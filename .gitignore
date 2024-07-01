@@ -1,2 +1,4 @@
 .vscode
 .env
+playground.ipynb
+**/__pycache__/
