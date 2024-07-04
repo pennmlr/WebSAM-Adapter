@@ -1,27 +1,28 @@
-'''
-#TODO: 
-- Sobel Extraction
-- Edge Components Tune
-- Patch Embedding Tune
-- SAM Image Encoder
-- SAM Mask decoder
-- Adapter layers
-'''
-import cv2
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-class SobelExtraction:
+class SobelExtraction(nn.Module):
     """
     Class to perform Sobel edge detection on an image.
 
     Args:
-        image (numpy.ndarray): The input image on which Sobel edge detection is performed.
+        image (torch.Tensor): batched input images of shape N x C x H x W
     """
-    def __init__ (self, image):
-        self.image = image
+    def __init__(self) -> None:
+        super().__init__()
     
-    def compute_sobel(self):
-        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-        I_sobel = np.sqrt(sobelx**2 + sobely**2)
-        return I_sobel
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gray = x.mean(dim=1, keepdim=True) # N x C x H x W -> N x 1 x H x W
+
+        # Sobel kernels
+        sk_x = torch.tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype=torch.float32).view(1, 1, 3, 3)
+        sk_y = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype=torch.float32).view(1, 1, 3, 3)
+        sk_x = sk_x.to(x.device)
+        sk_y = sk_y.to(x.device)
+
+        sobel_x = F.conv2d(gray, sk_x, padding=1)
+        sobel_y = F.conv2d(gray, sk_y, padding=1)
+        sobel = torch.sqrt(sobel_x ** 2 + sobel_y ** 2)
+
+        return sobel

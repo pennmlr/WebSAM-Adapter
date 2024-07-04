@@ -1,38 +1,26 @@
-import cv2
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from ../utils/utils.py import SobelExtraction
-    
+from utils.utils import SobelExtraction
+from backbone.SAMEncoder import PatchEmbed
 
 class ECTune(nn.Module):
     """
-    Module to project Sobel image patches into a feature space using a linear layer.
-
-    Args:
-        feature_dim (int): The dimension of the feature space.
-        patch_size (int): The size of the non-overlapping patches.
+    Linear layer on top of Sobel-filtered image patches.
     """
 
-    def __init__(self, feature_dim, patch_size):
-        super(ECTune, self).__init__()
-        self.feature_dim = feature_dim
-        self.patch_size = patch_size
-        self.linear_layer = nn.Linear(patch_size * patch_size, feature_dim)
+    def __init__(self, embed_dim: int = 768, patch_size: int = 16) -> None:
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.kernel_and_stride = (patch_size, patch_size)
+        self.sobel = SobelExtraction()
+        self.PatchEmbed = PatchEmbed(
+            kernel_size = self.kernel_and_stride,
+            stride = self.kernel_and_stride, 
+            embed_dim = self.embed_dim,
+            in_chans = 1
+        )
 
-    def extract_features(self, sobel_image):
-        patches = self.split_into_patches(sobel_image, self.patch_size)
-        projected_patches = self.project_to_feature_space(patches)
-        return projected_patches
-
-    def split_into_patches(self, image, patch_size):
-        image_tensor = torch.tensor(image, dtype=torch.float32)
-        patches = image_tensor.unfold(0, patch_size, patch_size).unfold(1, patch_size, patch_size)
-        patches = patches.contiguous().view(-1, patch_size * patch_size)
-        return patches
-
-    def project_to_feature_space(self, patches):
-        projected_patches = self.linear_layer(patches)
-        return projected_patches
-
+    def forward(self, x: torch.Tensor) -> torch.Tensor: # x: N x C x H x W
+        sobel = self.sobel(x)
+        patches = self.PatchEmbed(sobel)
+        return patches # N x (H / patch_size) x (W / patch_size) x embed_dim

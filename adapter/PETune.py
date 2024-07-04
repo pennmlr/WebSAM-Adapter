@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
-from typing import Type
 
-class PatchEmbeddingTune(nn.Module):
+class PETune(nn.Module):
     def __init__(
             self, 
             embed_dim: int = 768, 
