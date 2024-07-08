@@ -1,4 +1,3 @@
-# %%
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, Type, List
@@ -246,4 +245,3 @@ class MLP(nn.Module):
         if self.sigmoid_output:
             x = F.sigmoid(x)
         return x
-# %%
