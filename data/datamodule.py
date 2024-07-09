@@ -6,11 +6,13 @@ from dotenv import load_dotenv
 from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
-
+import concurrent.futures
+from sklearn.model_selection import train_test_split
+import pdb
+from torchvision import transforms
+import numpy as np
 
 load_dotenv()
-
-
 
 class S3DataLoader:
     def __init__(self,
@@ -30,8 +32,8 @@ class S3DataLoader:
 
     def ls(self, prefix=''):
         response = self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, Delimiter='/')
-        files = [content['Key'] for content in response.get('Contents', [])]
-        return files
+        directories = [content['Prefix'] for content in response.get('CommonPrefixes', [])]
+        return directories
 
     def read_json(self, key):
         obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
@@ -50,24 +52,41 @@ class S3DataLoader:
         return Image.open(io.BytesIO(obj['Body'].read()))
 
 
-class S3Dataset(Dataset):
-    def __init__(self, data_loader, files, transform=None):
-        self.data_loader = data_loader
-        self.files = files
-        self.transform = transform
+class S3BatchDataset(Dataset): 
+    def __init__(self, data_loader, files, batch_size, transform=None): 
+        self.data_loader = data_loader 
+        self.files = files 
+        self.batch_size = batch_size 
+        self.transform = transform 
+        self.batches = self.create_batches() 
 
-    def __len__(self):
-        return len(self.files)
+    def create_batches(self): 
+        batches = [self.files[i:i + self.batch_size] for i in range(0, len(self.files), self.batch_size)] 
+        return batches 
 
-    def __getitem__(self, idx):
+    def __len__(self): 
+        return len(self.batches)
 
-        
-        file_key = self.files[idx]
-        # You can customize this part based on your data type and requirements
-        data = self.data_loader.read_text(file_key)  # Assuming text data
-        if self.transform:
-            data = self.transform(data)
-        return data
+    def __getitem__(self, idx): 
+        batch_files = self.batches[idx]
+        data_batch = []
+
+        for file_key in batch_files:
+            index = file_key.split('/')[-1]
+            image_key = f"webis-webseg-20-screenshots/{file_key}/{'screenshot.png'}"
+            print(f"Image key: {image_key}")
+            image = self.data_loader.read_image(image_key)
+            json_key = f"webis-webseg-20-ground-truth/{index}/ground-truth.json"
+            ground_truth = self.data_loader.read_json(json_key).get('segmentations', {}).get('majority-vote', [])
+
+            if self.transform:
+                image = self.transform(image)
+
+            image_tensor = transforms.ToTensor()(image)
+
+            data_batch.append((image_tensor, ground_truth))
+
+        return data_batch
 
 
 if __name__ == "__main__":
@@ -82,5 +101,23 @@ if __name__ == "__main__":
         aws_secret_access_key=aws_secret_access_key,
     )
 
-    files = data_loader.ls()
-    print("Files in bucket:", files)
+    contents = data_loader.ls(prefix='')
+    print("Directories in bucket:", contents)
+
+    file_path = 'indices.txt'
+
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+
+    indices = [line[:-1] for line in lines][:-1]
+    
+    train_indices, test_indices = train_test_split(indices, test_size=0.3, random_state=42)
+
+    batch_size = 32 
+    train_dataset = S3BatchDataset(data_loader, train_indices, batch_size)
+    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+
+    for batch in train_dataloader:
+        for image, ground_truth in batch:
+            print("Image size:", image.size())
+            print("Ground truth shape:", len(ground_truth))
