@@ -4,9 +4,12 @@ import io
 import os
 from dotenv import load_dotenv
 from PIL import Image
+import torch
+from torch.utils.data import Dataset, DataLoader
 
 
 load_dotenv()
+
 
 
 class S3DataLoader:
@@ -27,8 +30,8 @@ class S3DataLoader:
 
     def ls(self, prefix=''):
         response = self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, Delimiter='/')
-        folders = [content['Prefix'] for content in response.get('CommonPrefixes', [])]
-        return folders
+        files = [content['Key'] for content in response.get('Contents', [])]
+        return files
 
     def read_json(self, key):
         obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
@@ -38,7 +41,6 @@ class S3DataLoader:
         obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
         return pd.read_csv(io.BytesIO(obj['Body'].read()))
 
-
     def read_text(self, key):
         obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
         return obj['Body'].read().decode('utf-8')
@@ -47,6 +49,25 @@ class S3DataLoader:
         obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
         return Image.open(io.BytesIO(obj['Body'].read()))
 
+
+class S3Dataset(Dataset):
+    def __init__(self, data_loader, files, transform=None):
+        self.data_loader = data_loader
+        self.files = files
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+
+        
+        file_key = self.files[idx]
+        # You can customize this part based on your data type and requirements
+        data = self.data_loader.read_text(file_key)  # Assuming text data
+        if self.transform:
+            data = self.transform(data)
+        return data
 
 
 if __name__ == "__main__":
