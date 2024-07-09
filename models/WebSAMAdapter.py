@@ -123,7 +123,6 @@ class WebSAMEncoder(nn.Module):
         x = self.neck(x.permute(0, 3, 1, 2))
         return x # N x out_chans x (H / patch_size) x (W / patch_size)
 
-# %%
 class WebSAMDecoder(nn.Module):
     def __init__(
         self,
@@ -219,6 +218,28 @@ class WebSAMDecoder(nn.Module):
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)
 
         return masks
+    
+class WebSAMAdapter(nn.Module):
+    def __init__(
+        self,
+        encoder: WebSAMEncoder,
+        decoder: WebSAMDecoder
+    ) -> None:
+        """
+        Complete WebSAM Adapter model
+
+        Args:
+            encoder (WebSAMEncoder): image encoder
+            decoder (WebSAMDecoder): mask decoder
+        """
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
 
 # Lightly adapted from
 # https://github.com/facebookresearch/MaskFormer/blob/main/mask_former/modeling/transformer/transformer_predictor.py # noqa

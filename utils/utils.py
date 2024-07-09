@@ -1,36 +1,89 @@
+from ultralytics import SAM
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
-class SobelExtraction(nn.Module):
+import matplotlib.pyplot as plt
+import cv2
+import json
+import os
+
+from models.WebSAMAdapter import WebSAMAdapter, WebSAMDecoder, WebSAMEncoder
+from backbone.transformer import TwoWayTransformer as twt
+
+def draw_segmentations(image_path: str, json_path: str) -> None:
     """
-    Class to perform Sobel edge detection on an image.
+    Plots and saves segmentations from JSON file on the image
 
     Args:
-        mean (list): channel-wise dataset mean
-        std (list): channel-wise dataset standard deviation
+        image_path (str): image path
+        json_path (str): JSON file path
     """
-    def __init__(
-            self, 
-            mean: list = [.485, .456, .406], 
-            std: list = [.229, .224, .225] # TODO: figure out WEBIS statistics
-        ) -> None:
-        super().__init__()
-        self.mean = torch.tensor(mean).view(1, 3, 1, 1)
-        self.std = torch.tensor(std).view(1, 3, 1, 1)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x * self.std + self.mean
-        gray = x.mean(dim=1, keepdim=True) # N x C x H x W -> N x 1 x H x W
+    # Load the image
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError(f"Image not found at {image_path}")
 
-        # Sobel kernels
-        sk_x = torch.tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype=torch.float32).view(1, 1, 3, 3)
-        sk_y = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype=torch.float32).view(1, 1, 3, 3)
-        sk_x = sk_x.to(x.device)
-        sk_y = sk_y.to(x.device)
+    # Read the JSON file
+    with open(json_path, 'r') as file:
+        data = json.load(file)
 
-        sobel_x = F.conv2d(gray, sk_x, padding=1)
-        sobel_y = F.conv2d(gray, sk_y, padding=1)
-        sobel = torch.sqrt(sobel_x ** 2 + sobel_y ** 2)
+    # Extract segmentation data
+    segmentations = data.get('segmentations', {}).get('majority-vote', [])
 
-        return sobel
+    # Draw each segmentation on the image
+    for segmentation in segmentations:
+        for segment in segmentation:
+            points = np.array(segment[0], dtype=np.int32)
+
+            # Check if points are properly formatted
+            if points.size == 0 or points.ndim != 2 or points.shape[1] != 2:
+                raise ValueError("Segmentation points are not properly formatted or empty")
+
+            cv2.polylines(image, [points], isClosed=True, color=(0, 255, 0), thickness=2)
+
+    # Convert image from BGR to RGB
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # Display the image with segmentations
+    plt.imshow(image_rgb)
+    plt.axis('off')
+    plt.show()
+    save_path = os.path.join(os.getcwd(), "test.png")
+    print(save_path)
+    cv2.imwrite(save_path, cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    print(f"Segmented image saved as {save_path}")
+
+def load_pretrained(wsa: WebSAMAdapter, SAM_path: str) -> WebSAMAdapter:
+    """
+    Load SAM weights into corresponding WebSAM-Adapter layers
+
+    Args:
+        encoder: WebSAMEncoder
+        SAM_path: path to pretrained SAM model
+
+    Returns:
+        WebSAMAdapter: model with SAM weights loaded
+    """
+    wsa_encoder = wsa.encoder
+    wsa_decoder = wsa.decoder
+    wsa_edict = wsa_encoder.state_dict()
+    wsa_ddict = wsa_decoder.state_dict()
+
+    sam_full = SAM(SAM_path).model
+    sam_encoder = sam_full.image_encoder
+    sam_decoder = sam_full.mask_decoder
+
+    # load encoder then decoder weights
+    for layer, weights in sam_encoder.state_dict().items():
+        if layer in wsa_edict:
+            wsa_edict[layer] = weights
+
+    for layer, weights in sam_decoder.state_dict().items():
+        if layer in wsa_ddict:
+            wsa_ddict[layer] = weights
+
+    wsa.encoder.load_state_dict(wsa_edict)
+    wsa.decoder.load_state_dict(wsa_ddict)
+    wsa = WebSAMAdapter(wsa.encoder, wsa.decoder)
+    return wsa
