@@ -38,12 +38,11 @@ def train_model(train_dataloader, model, criterion, optimizer, num_epochs=20, sa
 
     for epoch in range(num_epochs):
         running_loss = 0.0
-        for batch_idx, batch in enumerate(train_dataloader):
+        progress_bar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc=f"Epoch {epoch + 1}/{num_epochs}")
+        for batch_idx, batch in progress_bar:
             images, ground_truths = zip(*batch)
-            pdb.set_trace()
-            images = torch.stack(images).to(device)
-            ground_truths = torch.stack(ground_truths).to(device)
-
+            images = torch.stack(images).to(device).squeeze(1)
+            ground_truths = torch.stack(ground_truths).to(device).squeeze(1)
             # Zero the parameter gradients
             optimizer.zero_grad()
             # Forward pass
@@ -54,6 +53,7 @@ def train_model(train_dataloader, model, criterion, optimizer, num_epochs=20, sa
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
+            progress_bar.set_postfix(loss=loss.item())
 
         epoch_loss = running_loss / len(train_dataloader)
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}")

@@ -84,17 +84,20 @@ class S3BatchDataset(Dataset):
             index = file_key.split('/')[-1]
             image_key = f"webis-webseg-20-screenshots/{file_key}/screenshot.png"
             image = self.data_loader.read_image(image_key)
+
+            #added so input shape to EC tune layer is correct
             if image.mode != 'RGB':
                 image = image.convert('RGB')
-                
+
             json_key = f"webis-webseg-20-ground-truth/{index}/ground-truth.json"
             ground_truth = self.data_loader.read_text(json_key)
             ground_truth = json.loads(ground_truth).get('segmentations', {}).get('majority-vote', [])
 
             if self.transform:
                 image = self.transform(image)
-
-            mask_tensor = self.segmentations_to_mask(ground_truth, img_size=(1024, 1024))
+            
+            image = image.squeeze(0)
+            mask_tensor = self.segmentations_to_mask(ground_truth, img_size=(1024, 1024)).squeeze(0)
 
             data_batch.append((image, mask_tensor))
 
@@ -143,7 +146,7 @@ if __name__ == "__main__":
     train_indices = [indices[i] for i in train_indices.indices]
     test_indices = [indices[i] for i in test_indices.indices]
 
-    batch_size = 3 
+    batch_size = 1
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
@@ -155,10 +158,13 @@ if __name__ == "__main__":
     for i, batch in enumerate(train_dataloader):
         print(f"Batch {i + 1}")
         for image, ground_truth in batch:
-            for img, gt in zip(image, ground_truth):
-                img = img.permute(1, 2, 0).mul(255).byte().numpy()
-                img = Image.fromarray(img)
-                mask = gt.numpy() 
-                combined_image = combine_image_and_mask(img, mask)
-                combined_image.save(f"combined_image_batch_{i+1}.png")
-                print("Saved combined image for batch", i + 1)
+            # for img, gt in zip(image, ground_truth):
+            #     img = img.permute(1, 2, 0).mul(255).byte().numpy()
+            #     img = Image.fromarray(img)
+            #     mask = gt.numpy() 
+            #     combined_image = combine_image_and_mask(img, mask)
+            #     combined_image.save(f"combined_image_batch_{i+1}.png")
+            #     print("Saved combined image for batch", i + 1)
+
+            print("Image Shape: ", image.shape)
+            print("Ground Truth Mask Shape: ", ground_truth.shape)
