@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from tqdm import tqdm
 from dotenv import load_dotenv
 from torchvision import transforms
 from torch.utils.data import DataLoader
