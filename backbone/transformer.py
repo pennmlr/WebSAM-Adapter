@@ -15,16 +15,17 @@ from .common import MLPBlock
 class TwoWayTransformer(nn.Module):
     def __init__(
         self,
-        depth: int,
-        embedding_dim: int,
-        num_heads: int,
-        mlp_dim: int,
+        depth: int = 2,
+        embedding_dim: int = 256,
+        num_heads: int = 8,
+        mlp_dim: int = 2048,
         activation: Type[nn.Module] = nn.ReLU,
         attention_downsample_rate: int = 2,
     ) -> None:
         """
         A transformer decoder that attends to an input image using
-        queries whose positional embedding is supplied.
+        queries whose positional embedding is supplied. Defaults chosen
+        to align with Ultralytics SAM implementation.
 
         Args:
           depth (int): number of layers in the transformer

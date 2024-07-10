@@ -1,3 +1,4 @@
+# %%
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, Type, List
@@ -129,7 +130,7 @@ class WebSAMDecoder(nn.Module):
         *,
         transformer_dim: int,
         transformer: nn.Module,
-        num_multimask_outputs: int = 1, # TODO: figure out a good default
+        num_multimask_outputs: int = 3, # TODO: figure out a good default
         activation: Type[nn.Module] = nn.GELU
     ) -> None:
         """
@@ -266,3 +267,4 @@ class MLP(nn.Module):
         if self.sigmoid_output:
             x = F.sigmoid(x)
         return x
+# %%

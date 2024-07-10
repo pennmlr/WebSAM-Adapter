@@ -9,8 +9,7 @@ import cv2
 import json
 import os
 
-from models.WebSAMAdapter import WebSAMAdapter, WebSAMDecoder, WebSAMEncoder
-from backbone.transformer import TwoWayTransformer as twt
+from models.WebSAMAdapter import WebSAMAdapter
 
 def draw_segmentations(image_path: str, json_path: str) -> None:
     """
