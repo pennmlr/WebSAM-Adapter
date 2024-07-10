@@ -1,4 +1,5 @@
 import os
+import pdb
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -38,15 +39,17 @@ def train_model(train_dataloader, model, criterion, optimizer, num_epochs=20, sa
     for epoch in range(num_epochs):
         running_loss = 0.0
         for batch_idx, batch in enumerate(train_dataloader):
-            image, ground_truth = batch
-            image = image.to(device)
-            ground_truth = ground_truth.to(device)
+            images, ground_truths = zip(*batch)
+            pdb.set_trace()
+            images = torch.stack(images).to(device)
+            ground_truths = torch.stack(ground_truths).to(device)
+
             # Zero the parameter gradients
             optimizer.zero_grad()
             # Forward pass
-            outputs = model(image)
+            outputs = model(images)
             # Calculate loss
-            loss = criterion(outputs, ground_truth)
+            loss = criterion(outputs, ground_truths)
             # Backward pass and optimize
             loss.backward()
             optimizer.step()
@@ -84,8 +87,15 @@ if __name__ == "__main__":
     with open(file_path, 'r') as f:
         lines = f.readlines()
 
-    indices = [line.strip() for line in lines if line.strip()]
-    train_indices, test_indices = torch.utils.data.random_split(indices, [int(0.7 * len(indices)), int(0.3 * len(indices))])
+    indices = [line.strip() for line in lines if line.strip()][:-1]
+    
+    train_size = int(0.7 * len(indices))
+    test_size = len(indices) - train_size
+    train_indices, test_indices = torch.utils.data.random_split(indices, [train_size, test_size])
+
+    train_indices = [indices[i] for i in train_indices.indices]
+    test_indices = [indices[i] for i in test_indices.indices]
+
     batch_size = 5
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
