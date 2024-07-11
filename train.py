@@ -8,6 +8,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 from torchvision import transforms
 from torch.utils.data import DataLoader
+# from torchsummary import summary
 
 from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
 from backbone.transformer import TwoWayTransformer as transformer
@@ -43,12 +44,13 @@ def train_model(train_dataloader, model, criterion, optimizer, num_epochs=20, sa
         for batch_idx, batch in progress_bar:
             images, ground_truths = zip(*batch)
             images = torch.stack(images).to(device).squeeze(1)
-            ground_truths = torch.stack(ground_truths).to(device).squeeze(1)
+            ground_truths = torch.stack(ground_truths).to(device)
             # Zero the parameter gradients
             optimizer.zero_grad()
             # Forward pass
-            outputs = model(images)
+            outputs = model(images).squeeze(0)
             # Calculate loss
+            # pdb.set_trace()
             loss = criterion(outputs, ground_truths)
             # Backward pass and optimize
             loss.backward()
@@ -68,11 +70,11 @@ def train_model(train_dataloader, model, criterion, optimizer, num_epochs=20, sa
 
 if __name__ == "__main__":
     #remove later?
-    os.environ['OMP_NUM_THREADS'] = '1'
-    os.environ['OPENBLAS_NUM_THREADS'] = '1'
-    os.environ['MKL_NUM_THREADS'] = '1'
-    os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
-    os.environ['NUMEXPR_NUM_THREADS'] = '1'
+    # os.environ['OMP_NUM_THREADS'] = '1'
+    # os.environ['OPENBLAS_NUM_THREADS'] = '1'
+    # os.environ['MKL_NUM_THREADS'] = '1'
+    # os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
+    # os.environ['NUMEXPR_NUM_THREADS'] = '1'
 
     load_dotenv()
     bucket_name = "webis-webseg20"
@@ -97,7 +99,7 @@ if __name__ == "__main__":
     train_indices = [indices[i] for i in train_indices.indices]
     test_indices = [indices[i] for i in test_indices.indices]
 
-    batch_size = 5
+    batch_size = 2
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
@@ -113,7 +115,9 @@ if __name__ == "__main__":
     decoder = WebSAMDecoder(transformer_dim = 256, transformer = twt)
 
     model = WebSAMAdapter(encoder, decoder)
+    # summary(model, input_size=(3, 1024, 1024))
+
     criterion = BCEIoULoss()
     optimizer = optim.AdamW(model.parameters(), lr=2e-4)
     # Train the model
-    train_model(train_dataloader, model, criterion, optimizer, num_epochs=20)
+    train_model(train_dataloader, model, criterion, optimizer, num_epochs=1)

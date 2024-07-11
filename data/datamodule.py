@@ -10,7 +10,6 @@ from PIL import Image, ImageDraw, ImageOps
 from dotenv import load_dotenv
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
-from sklearn.model_selection import train_test_split
 
 load_dotenv()
 
@@ -84,7 +83,6 @@ class S3BatchDataset(Dataset):
             index = file_key.split('/')[-1]
             image_key = f"webis-webseg-20-screenshots/{file_key}/screenshot.png"
             image = self.data_loader.read_image(image_key)
-
             #added so input shape to EC tune layer is correct
             if image.mode != 'RGB':
                 image = image.convert('RGB')
@@ -92,7 +90,6 @@ class S3BatchDataset(Dataset):
             json_key = f"webis-webseg-20-ground-truth/{index}/ground-truth.json"
             ground_truth = self.data_loader.read_text(json_key)
             ground_truth = json.loads(ground_truth).get('segmentations', {}).get('majority-vote', [])
-
             if self.transform:
                 image = self.transform(image)
             

@@ -1,8 +1,11 @@
 # %%
 import torch
+import pdb
 import torch.nn as nn
+import numpy as np
 from typing import Optional, Tuple, Type, List
 import torch.nn.functional as F
+from torchvision import transforms
 
 import backbone.SAMEncoder as encoder
 from backbone.common import LayerNorm2d
@@ -156,20 +159,25 @@ class WebSAMDecoder(nn.Module):
             activation(),
             nn.ConvTranspose2d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2),
             activation(),
+            nn.ConvTranspose2d(transformer_dim // 8, 32, kernel_size=2, stride=2),
+            activation(),
+            nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
+            activation(),
         )
 
         self.output_hypernetworks_mlps = nn.ModuleList(
             [
-                MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
+                MLP(transformer_dim, transformer_dim, 32, 3)
                 for i in range(self.num_mask_tokens)
             ]
         )
+
 
     def forward(
         self,
         image_embeddings: torch.Tensor,
         image_pe: torch.Tensor,
-        multimask_output: bool = True, # TODO: check if right default
+        multimask_output: bool = False, # TODO: check if right default
     ) -> torch.Tensor:
         """
         Mask prediction given image embedding
@@ -206,17 +214,30 @@ class WebSAMDecoder(nn.Module):
         pos_src = torch.repeat_interleave(image_pe, output_tokens.shape[0], dim=0)
         b, c, h, w = src.shape
 
+        # print(f'src shape: {src.shape}')
+        # print(f'pos_src shape: {pos_src.shape}')
+        # print(f'output_tokens shape: {output_tokens.shape}')
+        
         hs, src = self.transformer(src, pos_src, output_tokens)
+        # print(f'hs shape after transformer: {hs.shape}')
+        # print(f'src shape after transformer: {src.shape}')
+        
         mask_tokens_out = hs[:, :self.num_mask_tokens, :]
+        # print(f'mask_tokens_out shape: {mask_tokens_out.shape}')
         
         src = src.transpose(1, 2).view(b, c, h, w)
         upscaled_embedding = self.output_upscaling(src)
+        # print(f'upscaled_embedding shape: {upscaled_embedding.shape}')
+
         hyper_in_list: List[torch.Tensor] = []
         for i in range(self.num_mask_tokens):
             hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :]))
         hyper_in = torch.stack(hyper_in_list, dim=1)
+        # print(f'hyper_in shape: {hyper_in.shape}')
+        
         b, c, h, w = upscaled_embedding.shape
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)
+        # print(f'masks shape: {masks.shape}')
 
         return masks
     
@@ -235,12 +256,48 @@ class WebSAMAdapter(nn.Module):
         """
         super().__init__()
         self.encoder = encoder
+        self.pe_layer = PositionEmbeddingRandom(128)
         self.decoder = decoder
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
+        image_embeddings = self.encoder(x)
+        mask = self.decoder(image_embeddings, image_pe=self.pe_layer((64, 64)).unsqueeze(0))
+        # #TODO: post process back to OG shape
+        # mask = self.postprocess_masks(low_res_mask, input_size=(1024, 1024), original_size=original_shape)
+        # pdb.set_trace()
+        return mask
+
+
+    def postprocess_masks(
+        self,
+        masks: torch.Tensor,
+        input_size: Tuple[int, ...],
+        original_size: Tuple[int, ...],
+    ) -> torch.Tensor:
+        """
+        Remove padding and upscale masks to the original image size.
+
+        Arguments:
+          masks (torch.Tensor): Batched masks from the mask_decoder,
+            in BxCxHxW format.
+          input_size (tuple(int, int)): The size of the image input to the
+            model, in (H, W) format. Used to remove padding.
+          original_size (tuple(int, int)): The original size of the image
+            before resizing for input to the model, in (H, W) format.
+
+        Returns:
+          (torch.Tensor): Batched masks in BxCxHxW format, where (H, W)
+            is given by original_size.
+        """
+        masks = F.interpolate(
+            masks,
+            (self.encoder.img_size, self.encoder.img_size),
+            mode="bilinear",
+            align_corners=False,
+        )
+        masks = masks[..., : input_size[0], : input_size[1]]
+        masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False)
+        return masks
 
 # Lightly adapted from
 # https://github.com/facebookresearch/MaskFormer/blob/main/mask_former/modeling/transformer/transformer_predictor.py # noqa
@@ -268,3 +325,49 @@ class MLP(nn.Module):
             x = F.sigmoid(x)
         return x
 # %%
+
+
+class PositionEmbeddingRandom(nn.Module):
+    """
+    Positional encoding using random spatial frequencies.
+    """
+
+    def __init__(self, num_pos_feats: int = 64, scale: Optional[float] = None) -> None:
+        super().__init__()
+        if scale is None or scale <= 0.0:
+            scale = 1.0
+        self.register_buffer(
+            "positional_encoding_gaussian_matrix",
+            scale * torch.randn((2, num_pos_feats)),
+        )
+
+    def _pe_encoding(self, coords: torch.Tensor) -> torch.Tensor:
+        """Positionally encode points that are normalized to [0,1]."""
+        # assuming coords are in [0, 1]^2 square and have d_1 x ... x d_n x 2 shape
+        coords = 2 * coords - 1
+        coords = coords @ self.positional_encoding_gaussian_matrix
+        coords = 2 * np.pi * coords
+        # outputs d_1 x ... x d_n x C shape
+        return torch.cat([torch.sin(coords), torch.cos(coords)], dim=-1)
+
+    def forward(self, size: Tuple[int, int]) -> torch.Tensor:
+        """Generate positional encoding for a grid of the specified size."""
+        h, w = size
+        device: Any = self.positional_encoding_gaussian_matrix.device
+        grid = torch.ones((h, w), device=device, dtype=torch.float32)
+        y_embed = grid.cumsum(dim=0) - 0.5
+        x_embed = grid.cumsum(dim=1) - 0.5
+        y_embed = y_embed / h
+        x_embed = x_embed / w
+
+        pe = self._pe_encoding(torch.stack([x_embed, y_embed], dim=-1))
+        return pe.permute(2, 0, 1)  # C x H x W
+
+    def forward_with_coords(
+        self, coords_input: torch.Tensor, image_size: Tuple[int, int]
+    ) -> torch.Tensor:
+        """Positionally encode points that are not normalized to [0,1]."""
+        coords = coords_input.clone()
+        coords[:, :, 0] = coords[:, :, 0] / image_size[1]
+        coords[:, :, 1] = coords[:, :, 1] / image_size[0]
+        return self._pe_encoding(coords.to(torch.float))  # B x N x C
