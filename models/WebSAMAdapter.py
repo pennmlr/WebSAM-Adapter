@@ -1,4 +1,3 @@
-# %%
 import torch
 import pdb
 import torch.nn as nn
@@ -66,11 +65,15 @@ class WebSAMEncoder(nn.Module):
             embed_dim=embed_dim
         )
 
+        for p in self.patch_embed.parameters():
+            p.requires_grad = False
+
         self.pos_embed: Optional[nn.Parameter] = None
         if use_abs_pos:
             self.pos_embed = nn.Parameter(
                 torch.zeros(1, img_size // patch_size, img_size // patch_size, embed_dim)
             )
+            self.pos_embed.requires_grad = False
 
         self.blocks = nn.ModuleList()
         for i in range(depth):
@@ -86,6 +89,8 @@ class WebSAMEncoder(nn.Module):
                 window_size=window_size if i not in global_attn_indexes else 0,
                 input_size=(img_size // patch_size, img_size // patch_size),
             )
+            for p in block.parameters():
+                p.requires_grad = False
             self.blocks.append(block)
 
         self.ECTune = ECTune(embed_dim=embed_dim, patch_size=patch_size)
@@ -110,6 +115,9 @@ class WebSAMEncoder(nn.Module):
             ),
             LayerNorm2d(out_chans),
         )
+
+        for p in self.neck.parameters():
+            p.requires_grad = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         ec_tuned = self.ECTune(x) # N x (H / patch_size) x (W / patch_size) x embed_dim
@@ -324,8 +332,6 @@ class MLP(nn.Module):
         if self.sigmoid_output:
             x = F.sigmoid(x)
         return x
-# %%
-
 
 class PositionEmbeddingRandom(nn.Module):
     """

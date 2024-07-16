@@ -8,11 +8,12 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 from torchvision import transforms
 from torch.utils.data import DataLoader
+from utils.utils import load_pretrained
 # from torchsummary import summary
 
-from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
-from backbone.transformer import TwoWayTransformer as transformer
 from data.datamodule import S3DataLoader, S3BatchDataset
+from backbone.transformer import TwoWayTransformer as transformer
+from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
 
 # Define custom loss function
 class BCEIoULoss(nn.Module):
@@ -30,9 +31,10 @@ class BCEIoULoss(nn.Module):
         iou_loss = 1 - (intersection + 1) / (union + 1)
         return bce_loss + iou_loss.mean()
     
-def train_model(train_dataloader, model, criterion, optimizer, num_epochs=20, save_dir='./saved_models'):
+def train_model(train_dataloader, model, criterion, optimizer, sam_path, num_epochs=20, save_dir='./saved_models'):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    load_pretrained(model, sam_path, ignore=['output_upscaling'])
     model.train()
 
     if not os.path.exists(save_dir):

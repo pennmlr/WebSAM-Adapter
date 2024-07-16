@@ -1,10 +1,11 @@
-from ultralytics import SAM
-import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from ultralytics import SAM
+import torch.nn as nn
 import numpy as np
+import torch
 
 import matplotlib.pyplot as plt
+from typing import List
 import cv2
 import json
 import os
@@ -53,13 +54,14 @@ def draw_segmentations(image_path: str, json_path: str) -> None:
     cv2.imwrite(save_path, cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     print(f"Segmented image saved as {save_path}")
 
-def load_pretrained(wsa: WebSAMAdapter, SAM_path: str) -> WebSAMAdapter:
+def load_pretrained(wsa: WebSAMAdapter, SAM_path: str, ignore: List[str]) -> WebSAMAdapter:
     """
     Load SAM weights into corresponding WebSAM-Adapter layers
 
     Args:
         encoder: WebSAMEncoder
         SAM_path: path to pretrained SAM model
+        ignore: list of layers to ignore
 
     Returns:
         WebSAMAdapter: model with SAM weights loaded
@@ -75,7 +77,7 @@ def load_pretrained(wsa: WebSAMAdapter, SAM_path: str) -> WebSAMAdapter:
 
     # load encoder then decoder weights
     for layer, weights in sam_encoder.state_dict().items():
-        if layer in wsa_edict:
+        if layer in wsa_edict and layer not in ignore:
             wsa_edict[layer] = weights
 
     for layer, weights in sam_decoder.state_dict().items():
