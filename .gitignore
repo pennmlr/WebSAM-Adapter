@@ -1,6 +1,10 @@
 .vscode
 .env
 playground.ipynb
+.pt
+sam_b.pt
+.out
+.log
 **/__pycache__/
 .pth
 .pt

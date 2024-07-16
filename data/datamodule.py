@@ -150,7 +150,7 @@ if __name__ == "__main__":
     ])
 
     train_dataset = S3BatchDataset(data_loader, train_indices, batch_size, transform=resize_transform)
-    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     for i, batch in enumerate(train_dataloader):
         print(f"Batch {i + 1}")

@@ -1,0 +1,12 @@
+cpu-bind=MASK - node102, task  0  0 [1185811]: mask 0xf000000000000000000000000000f000000000000000000 set
+Traceback (most recent call last):
+  File "/home/alokshah/apps/WebSAM-Adapter/train.py", line 148, in <module>
+    train_model(train_dataloader, val_dataloader, model, criterion, optimizer, sam_path, num_epochs=20)
+  File "/home/alokshah/apps/WebSAM-Adapter/train.py", line 42, in train_model
+    load_pretrained(model, sam_path, ignore=['output_upscaling'])
+  File "/home/alokshah/apps/WebSAM-Adapter/utils/utils.py", line 74, in load_pretrained
+    sam_full = SAM(SAM_path).model
+               ^^^^^^^^^^^^^
+  File "/home/alokshah/miniconda3/envs/websam_env/lib/python3.12/site-packages/ultralytics/models/sam/model.py", line 46, in __init__
+    raise NotImplementedError("SAM prediction requires pre-trained *.pt or *.pth model.")
+NotImplementedError: SAM prediction requires pre-trained *.pt or *.pth model.
