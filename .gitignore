@@ -2,7 +2,8 @@
 .env
 playground.ipynb
 .pt
-sam_b.pt
+checkpoints/
+
 .out
 .log
 **/__pycache__/

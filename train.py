@@ -39,6 +39,7 @@ class BCEIoULoss(nn.Module):
 def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, sam_path, num_epochs=20, save_dir='./saved_models'):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    print("device: ", device)
     load_pretrained(model, sam_path, ignore=['output_upscaling'])
     model.train()
 
@@ -55,7 +56,7 @@ def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, s
             # Zero the parameter gradients
             optimizer.zero_grad()
             # Forward pass
-            outputs = model(images).squeeze(0)
+            outputs = model(images)
             # Calculate loss
             # pdb.set_trace()
             loss = criterion(outputs, ground_truths)
@@ -144,5 +145,5 @@ if __name__ == "__main__":
     criterion = BCEIoULoss()
     optimizer = optim.AdamW(model.parameters(), lr=2e-4)
     # Train the model
-    sam_path = 'sam_b.pt'  # Add the correct path to SAM weights here
+    sam_path = 'checkpoints/sam_b.pt'  # Add the correct path to SAM weights here
     train_model(train_dataloader, val_dataloader, model, criterion, optimizer, sam_path, num_epochs=20)

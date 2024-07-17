@@ -169,8 +169,12 @@ class WebSAMDecoder(nn.Module):
             activation(),
             nn.ConvTranspose2d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2),
             activation(),
+            nn.ConvTranspose2d(transformer_dim // 8, 32, kernel_size=2, stride=2),
+            activation(),
+            nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
+            activation(),
         )
-
+        
         self.output_hypernetworks_mlps = nn.ModuleList(
             [
                 MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
