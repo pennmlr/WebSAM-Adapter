@@ -17,8 +17,9 @@ class SobelExtraction(nn.Module):
             std: list = [.229, .224, .225] # TODO: figure out WEBIS statistics
         ) -> None:
         super().__init__()
-        self.mean = torch.tensor(mean).view(1, 3, 1, 1)
-        self.std = torch.tensor(std).view(1, 3, 1, 1)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.mean = torch.tensor(mean).view(1, 3, 1, 1).to(device)
+        self.std = torch.tensor(std).view(1, 3, 1, 1).to(device)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x * self.std + self.mean

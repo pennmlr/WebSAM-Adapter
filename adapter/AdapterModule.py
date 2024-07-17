@@ -68,7 +68,7 @@ class UnsharedLayers(nn.Module):
         """
         super().__init__()
         hidden_size = int(input_size * mlp_ratio)
-        self.layers = []
+        self.layers = nn.ModuleList()
         for _ in range(num_adapters):
             layers = nn.ModuleList([])
             layers.append(nn.Sequential(
@@ -119,7 +119,9 @@ class AdapterModule(nn.Module):
         self.shared = shared
 
     def forward(self, x: torch.Tensor, layer: int) -> torch.Tensor:
+        x = x.to(next(self.unshared.layers[layer][0].parameters()).device)  # Move to the same device as the unshared layer
         x = self.unshared(x, layer)
         x = self.GELU(x)
+        x = x.to(next(self.shared.parameters()).device)  # Move to the same device as the shared layer
         x = self.shared(x)
         return x

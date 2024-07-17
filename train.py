@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     # Initialize model, loss, and optimizer
     encoder = WebSAMEncoder()
-    twt = transformer(depth = 12, embedding_dim = 256, num_heads = 8, mlp_dim = 256)
+    twt = transformer(depth = 12, embedding_dim = 256, num_heads = 8, mlp_dim = 2048)
     decoder = WebSAMDecoder(transformer_dim = 256, transformer = twt)
 
     model = WebSAMAdapter(encoder, decoder)

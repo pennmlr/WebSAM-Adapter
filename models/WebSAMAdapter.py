@@ -56,6 +56,8 @@ class WebSAMEncoder(nn.Module):
             global_attn_indexes (Tuple[int, ...], optional): indices for blocks using global attention
         """
         super().__init__()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.img_size = img_size
 
         self.patch_embed = encoder.PatchEmbed(
@@ -63,7 +65,7 @@ class WebSAMEncoder(nn.Module):
             stride=(patch_size, patch_size),
             in_chans=in_chans,
             embed_dim=embed_dim
-        )
+        ).to(device)
 
         for p in self.patch_embed.parameters():
             p.requires_grad = False
@@ -75,7 +77,7 @@ class WebSAMEncoder(nn.Module):
             )
             self.pos_embed.requires_grad = False
 
-        self.blocks = nn.ModuleList()
+        self.blocks = nn.ModuleList().to(device)
         for i in range(depth):
             block = encoder.Block(
                 dim=embed_dim,
@@ -88,15 +90,15 @@ class WebSAMEncoder(nn.Module):
                 rel_pos_zero_init=rel_pos_zero_init,
                 window_size=window_size if i not in global_attn_indexes else 0,
                 input_size=(img_size // patch_size, img_size // patch_size),
-            )
+            ).to(device)
             for p in block.parameters():
                 p.requires_grad = False
             self.blocks.append(block)
-
-        self.ECTune = ECTune(embed_dim=embed_dim, patch_size=patch_size)
-        self.PETune = PETune(embed_dim=embed_dim)
-        self.shared = SharedUpLayer(input_size = embed_dim, num_layers = 1)
-        self.adapters = AdapterModule(shared = self.shared, num_adapters = depth, num_layers = 1)
+        self.blocks.to(device)
+        self.ECTune = ECTune(embed_dim=embed_dim, patch_size=patch_size).to(device)
+        self.PETune = PETune(embed_dim=embed_dim).to(device)
+        self.shared = SharedUpLayer(input_size = embed_dim, num_layers = 1).to(device)
+        self.adapters = AdapterModule(shared = self.shared, num_adapters = depth, num_layers = 1).to(device)
 
         self.neck = nn.Sequential(
             nn.Conv2d(
@@ -114,7 +116,7 @@ class WebSAMEncoder(nn.Module):
                 bias=False,
             ),
             LayerNorm2d(out_chans),
-        )
+        ).to(device)
 
         for p in self.neck.parameters():
             p.requires_grad = False
@@ -167,18 +169,15 @@ class WebSAMDecoder(nn.Module):
             activation(),
             nn.ConvTranspose2d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2),
             activation(),
-            nn.ConvTranspose2d(transformer_dim // 8, 32, kernel_size=2, stride=2),
-            activation(),
-            nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
-            activation(),
         )
 
         self.output_hypernetworks_mlps = nn.ModuleList(
             [
-                MLP(transformer_dim, transformer_dim, 32, 3)
+                MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
                 for i in range(self.num_mask_tokens)
             ]
         )
+
 
 
     def forward(
@@ -263,9 +262,10 @@ class WebSAMAdapter(nn.Module):
             decoder (WebSAMDecoder): mask decoder
         """
         super().__init__()
-        self.encoder = encoder
-        self.pe_layer = PositionEmbeddingRandom(128)
-        self.decoder = decoder
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.encoder = encoder.to(device)
+        self.pe_layer = PositionEmbeddingRandom(128).to(device)
+        self.decoder = decoder.to(device)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         image_embeddings = self.encoder(x)
