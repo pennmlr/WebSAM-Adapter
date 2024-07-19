@@ -1,25 +1,19 @@
 import os
-import pdb
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import logging
-
 from tqdm import tqdm
 from dotenv import load_dotenv
 from torchvision import transforms
 from torch.utils.data import DataLoader, random_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from utils.utils import load_pretrained
-# from torchsummary import summary
-
 from data.datamodule import S3DataLoader, S3BatchDataset
 from backbone.transformer import TwoWayTransformer as transformer
 from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
 
-
 logging.basicConfig(filename='training.log', level=logging.INFO)
-
 
 # Define custom loss function
 class BCEIoULoss(nn.Module):
@@ -30,16 +24,12 @@ class BCEIoULoss(nn.Module):
     def forward(self, inputs, targets):
         bce_loss = self.bce_loss(inputs, targets)
         inputs = torch.sigmoid(inputs)
-
         intersection = (inputs * targets).sum(dim=(1, 2, 3))
         union = inputs.sum(dim=(1, 2, 3)) + targets.sum(dim=(1, 2, 3)) - intersection
-        
         iou_loss = 1 - (intersection + 1) / (union + 1)
         iou_loss = iou_loss.mean()
-
         print("BCE Loss: ", bce_loss)
         print("IOU Loss: ", iou_loss)
-        
         return bce_loss + iou_loss
 
 def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, num_epochs=20, save_dir='./saved_models', start_epoch=0):
@@ -60,13 +50,9 @@ def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, s
             images = torch.stack(images).to(device).squeeze(1)
             ground_truths = torch.stack(ground_truths).to(device)
             print(f"GPU Memory Usage (current, max): {torch.cuda.memory_allocated(device) / 1024 ** 3:.2f} GB, {torch.cuda.max_memory_allocated(device) / 1024 ** 3:.2f} GB")
-            # Zero the parameter gradients
             optimizer.zero_grad()
-            # Forward pass
             outputs = model(images)
-            # Calculate loss
             loss = criterion(outputs, ground_truths)
-            # Backward pass and optimize
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -82,7 +68,6 @@ def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, s
 
         scheduler.step()
 
-        # Save model weights every other epoch
         if (epoch + 1) % 2 == 0:
             save_path = os.path.join(save_dir, f'model_epoch_{epoch + 1}.pt')
             state = {
@@ -127,10 +112,15 @@ if __name__ == "__main__":
 
     indices = [line.strip() for line in lines if line.strip()][:-1]
     
+    seed = 42
+    torch.manual_seed(seed)
+
     train_size = int(0.7 * len(indices))
     val_size = int(0.2 * len(indices))
     test_size = len(indices) - train_size - val_size
-    train_indices, val_indices, test_indices = random_split(indices, [train_size, val_size, test_size])
+
+    generator = torch.Generator().manual_seed(seed)
+    train_indices, val_indices, test_indices = random_split(indices, [train_size, val_size, test_size], generator=generator)
 
     train_indices = [indices[i] for i in train_indices.indices]
     val_indices = [indices[i] for i in val_indices.indices]
@@ -147,19 +137,16 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
-    # Initialize model, loss, and optimizer
     encoder = WebSAMEncoder()
-    twt = transformer(depth = 12, embedding_dim = 256, num_heads = 8, mlp_dim = 2048)
-    decoder = WebSAMDecoder(transformer_dim = 256, transformer = twt)
+    twt = transformer(depth=12, embedding_dim=256, num_heads=8, mlp_dim=2048)
+    decoder = WebSAMDecoder(transformer_dim=256, transformer=twt)
 
     model = WebSAMAdapter(encoder, decoder)
-    # summary(model, input_size=(3, 1024, 1024))
 
     criterion = BCEIoULoss()
     optimizer = optim.AdamW(model.parameters(), lr=2e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=20)
 
-    # Load saved state if exists
     start_epoch = 4
     checkpoint_path = './saved_models'
     latest_checkpoint = None
@@ -170,16 +157,10 @@ if __name__ == "__main__":
     
     if latest_checkpoint:
         checkpoint = torch.load(os.path.join(checkpoint_path, latest_checkpoint))
-        model.load_state_dict(checkpoint)
-
-        # model.load_state_dict(checkpoint['model_state_dict'])
-        # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        # start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Resuming training from epoch {start_epoch + 1}")
     else:
-        # Load pretrained weights only if not resuming from a checkpoint
-        sam_path = 'checkpoints/sam_b.pt'  # Add the correct path to SAM weights here
+        sam_path = 'checkpoints/sam_b.pt'
         load_pretrained(model, sam_path, ignore=['output_upscaling'])
 
-    # Train the model
     train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, num_epochs=20, start_epoch=start_epoch)
