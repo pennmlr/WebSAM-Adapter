@@ -143,14 +143,14 @@ if __name__ == "__main__":
     train_indices = [indices[i] for i in train_indices.indices]
     test_indices = [indices[i] for i in test_indices.indices]
 
-    batch_size = 1
+    batch_size = 2
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
     ])
 
     train_dataset = S3BatchDataset(data_loader, train_indices, batch_size, transform=resize_transform)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
     for i, batch in enumerate(train_dataloader):
         print(f"Batch {i + 1}")
@@ -165,3 +165,5 @@ if __name__ == "__main__":
 
             print("Image Shape: ", image.shape)
             print("Ground Truth Mask Shape: ", ground_truth.shape)
+            images, ground_truths = zip(*batch)
+

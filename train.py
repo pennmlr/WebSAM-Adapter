@@ -9,6 +9,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 from torchvision import transforms
 from torch.utils.data import DataLoader, random_split
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from utils.utils import load_pretrained
 # from torchsummary import summary
 
@@ -32,33 +33,38 @@ class BCEIoULoss(nn.Module):
 
         intersection = (inputs * targets).sum(dim=(1, 2, 3))
         union = inputs.sum(dim=(1, 2, 3)) + targets.sum(dim=(1, 2, 3)) - intersection
-
+        
         iou_loss = 1 - (intersection + 1) / (union + 1)
-        return bce_loss + iou_loss.mean()
+        iou_loss = iou_loss.mean()
 
-def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, sam_path, num_epochs=20, save_dir='./saved_models'):
+        print("BCE Loss: ", bce_loss)
+        print("IOU Loss: ", iou_loss)
+        
+        return bce_loss + iou_loss
+
+def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, num_epochs=20, save_dir='./saved_models', start_epoch=0):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    print("CUDA available: ", torch.cuda.is_available())
     print("device: ", device)
-    load_pretrained(model, sam_path, ignore=['output_upscaling'])
     model.train()
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         running_loss = 0.0
         progress_bar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc=f"Epoch {epoch + 1}/{num_epochs}")
         for batch_idx, batch in progress_bar:
             images, ground_truths = zip(*batch)
             images = torch.stack(images).to(device).squeeze(1)
             ground_truths = torch.stack(ground_truths).to(device)
+            print(f"GPU Memory Usage (current, max): {torch.cuda.memory_allocated(device) / 1024 ** 3:.2f} GB, {torch.cuda.max_memory_allocated(device) / 1024 ** 3:.2f} GB")
             # Zero the parameter gradients
             optimizer.zero_grad()
             # Forward pass
             outputs = model(images)
             # Calculate loss
-            # pdb.set_trace()
             loss = criterion(outputs, ground_truths)
             # Backward pass and optimize
             loss.backward()
@@ -74,10 +80,17 @@ def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, s
         print(f"Validation Loss: {val_loss:.4f}")
         logging.info(f'Epoch: {epoch+1}, Validation Loss: {val_loss:.4f}')
 
+        scheduler.step()
+
         # Save model weights every other epoch
         if (epoch + 1) % 2 == 0:
             save_path = os.path.join(save_dir, f'model_epoch_{epoch + 1}.pt')
-            torch.save(model.state_dict(), save_path)
+            state = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict()
+            }
+            torch.save(state, save_path)
             print(f"Saved model weights at epoch {epoch + 1} to {save_path}")
             logging.info(f'Saved model weights at epoch {epoch + 1} to {save_path}')
 
@@ -144,6 +157,29 @@ if __name__ == "__main__":
 
     criterion = BCEIoULoss()
     optimizer = optim.AdamW(model.parameters(), lr=2e-4)
+    scheduler = CosineAnnealingLR(optimizer, T_max=20)
+
+    # Load saved state if exists
+    start_epoch = 4
+    checkpoint_path = './saved_models'
+    latest_checkpoint = None
+    if os.path.exists(checkpoint_path):
+        checkpoint_files = [f for f in os.listdir(checkpoint_path) if f.endswith('.pt')]
+        if checkpoint_files:
+            latest_checkpoint = max(checkpoint_files, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    
+    if latest_checkpoint:
+        checkpoint = torch.load(os.path.join(checkpoint_path, latest_checkpoint))
+        model.load_state_dict(checkpoint)
+
+        # model.load_state_dict(checkpoint['model_state_dict'])
+        # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # start_epoch = checkpoint['epoch']
+        print(f"Resuming training from epoch {start_epoch + 1}")
+    else:
+        # Load pretrained weights only if not resuming from a checkpoint
+        sam_path = 'checkpoints/sam_b.pt'  # Add the correct path to SAM weights here
+        load_pretrained(model, sam_path, ignore=['output_upscaling'])
+
     # Train the model
-    sam_path = 'checkpoints/sam_b.pt'  # Add the correct path to SAM weights here
-    train_model(train_dataloader, val_dataloader, model, criterion, optimizer, sam_path, num_epochs=20)
+    train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, num_epochs=20, start_epoch=start_epoch)

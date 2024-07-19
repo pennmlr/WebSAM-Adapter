@@ -3,9 +3,8 @@
 playground.ipynb
 .pt
 checkpoints/
-
+saved_models/
 .out
-.log
 **/__pycache__/
 .pth
 .pt
