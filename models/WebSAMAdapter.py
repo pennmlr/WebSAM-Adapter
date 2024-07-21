@@ -292,17 +292,26 @@ class WebSAMAdapter(nn.Module):
         self.decoder = decoder.to(device)
     
     def forward(self, x: torch.Tensor, x_shapes: torch.Tensor) -> torch.Tensor:
+        #can be batched
+        batch_size = x.size(0)
         image_embeddings = self.encoder(x)
         low_res_masks = self.decoder(image_embeddings, image_pe=self.pe_layer((64, 64)).unsqueeze(0))
-        mask = self.postprocess_masks(
-            low_res_masks,
-            input_size = (1024, 1024),
-            original_size = tuple(x_shapes.flatten().tolist()),
-        )
-        # #TODO: post process back to OG shape
-        # mask = self.postprocess_masks(low_res_mask, input_size=(1024, 1024), original_size=original_shape)
-        # pdb.set_trace()
-        return mask
+        
+
+        #cannot be batched because mask outputs will have inhomogenous dimension
+        masks = []
+        for low_res_mask, x_shape in zip(low_res_masks, x_shapes):
+            mask = self.postprocess_masks(
+                low_res_mask.unsqueeze(0),
+                input_size = (1024, 1024),
+                original_size = tuple(x_shape.flatten().tolist()),
+            )
+            
+            # pdb.set_trace()
+
+            masks.append(mask)
+
+        return masks
 
 
     def postprocess_masks(
@@ -328,12 +337,12 @@ class WebSAMAdapter(nn.Module):
         """
         masks = F.interpolate(
             masks,
-            (self.encoder.img_size, self.encoder.img_size),
+            tuple([self.encoder.img_size, self.encoder.img_size]),
             mode="bilinear",
             align_corners=False,
         )
         masks = masks[..., : input_size[0], : input_size[1]]
-        masks = F.interpolate(masks, (original_size[-2], original_size[-1]), mode="bilinear", align_corners=False)
+        masks = F.interpolate(masks, original_size[::-1], mode="bilinear", align_corners=False)
         return masks
 
 # Lightly adapted from

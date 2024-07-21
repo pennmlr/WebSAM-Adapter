@@ -9,3 +9,4 @@ saved_models/
 .pth
 .pt
 notebooks/
+.sh

@@ -16,7 +16,6 @@ from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
 
 logging.basicConfig(filename='training.log', level=logging.INFO)
 
-# Define custom loss function
 class BCEIoULoss(nn.Module):
     def __init__(self):
         super(BCEIoULoss, self).__init__()
@@ -24,16 +23,19 @@ class BCEIoULoss(nn.Module):
 
     def forward(self, inputs, targets):
         bce_loss = self.bce_loss(inputs, targets)
-        inputs = torch.sigmoid(inputs)
+        inputs = torch.sigmoid(inputs).round()
         intersection = (inputs * targets).sum(dim=(1, 2, 3))
         union = inputs.sum(dim=(1, 2, 3)) + targets.sum(dim=(1, 2, 3)) - intersection
         iou_loss = 1 - (intersection + 1) / (union + 1)
         iou_loss = iou_loss.mean()
         print("BCE Loss: ", bce_loss)
         print("IOU Loss: ", iou_loss)
+        print(f"Inputs requires grad: {inputs.requires_grad}")
+        print(f"Targets requires grad: {targets.requires_grad}")
         return bce_loss + iou_loss
 
-def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, num_epochs=20, save_dir='./saved_models', start_epoch=0):
+
+def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, batch_size, num_epochs=20, save_dir='./saved_models', start_epoch=0):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     print("CUDA available: ", torch.cuda.is_available())
@@ -47,19 +49,24 @@ def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, s
         running_loss = 0.0
         progress_bar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc=f"Epoch {epoch + 1}/{num_epochs}")
         for batch_idx, batch in progress_bar:
-            image_tuples, ground_truths = zip(*batch)
+            image_tuples, targets = zip(*batch)
             images, image_shapes = zip(*image_tuples)
+            # to parallelize the encoder-decoder passes
             images = torch.stack(images).to(device).squeeze(1)
             image_shapes = torch.stack(image_shapes).to(device)
-            ground_truths = torch.stack(ground_truths).to(device)
             print(f"GPU Memory Usage (current, max): {torch.cuda.memory_allocated(device) / 1024 ** 3:.2f} GB, {torch.cuda.max_memory_allocated(device) / 1024 ** 3:.2f} GB")
             optimizer.zero_grad()
-            outputs = model(images, image_shapes)
-            # pdb.set_trace()
-            loss = criterion(outputs, ground_truths)
+            outputs = model(images, image_shapes) # List of length batch_size containing each images corresponding mask
+
+            loss = 0
+            for output, target in zip(outputs, targets):
+                loss += criterion(output, target.unsqueeze(0).to(device))
+        
             loss.backward()
+            
             optimizer.step()
             running_loss += loss.item()
+
             progress_bar.set_postfix(loss=loss.item())
 
         epoch_loss = running_loss / len(train_dataloader)
@@ -91,13 +98,18 @@ def validate_model(val_dataloader, model, criterion, device):
     val_loss = 0.0
     with torch.no_grad():
         for batch in val_dataloader:
-            image_tuples , ground_truths = zip(*batch)
+            image_tuples, targets = zip(*batch)
             images, image_shapes = zip(*image_tuples)
             images = torch.stack(images).to(device).squeeze(1)
             image_shapes = torch.stack(image_shapes).to(device)
-            ground_truths = torch.stack(ground_truths).to(device)
-            outputs = model(images, image_shapes)
-            loss = criterion(outputs, ground_truths)
+            print(f"GPU Memory Usage (current, max): {torch.cuda.memory_allocated(device) / 1024 ** 3:.2f} GB, {torch.cuda.max_memory_allocated(device) / 1024 ** 3:.2f} GB")
+            optimizer.zero_grad()
+            outputs = model(images, image_shapes) 
+
+            loss = 0
+            for output, target in zip(outputs, targets):
+                loss += criterion(output, target.unsqueeze(0).to(device))
+        
             val_loss += loss.item()
     return val_loss / len(val_dataloader)
 
@@ -129,7 +141,7 @@ if __name__ == "__main__":
     val_indices = [indices[i] for i in val_indices.indices]
     test_indices = [indices[i] for i in test_indices.indices]
 
-    batch_size = 16
+    batch_size = 8
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
@@ -167,4 +179,4 @@ if __name__ == "__main__":
     sam_path = 'checkpoints/sam_b.pt'
     model = load_pretrained(model, sam_path, ignore=[])
 
-    train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, num_epochs=20, start_epoch=start_epoch)
+    train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, batch_size, num_epochs=20, start_epoch=start_epoch)

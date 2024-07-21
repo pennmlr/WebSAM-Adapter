@@ -81,7 +81,7 @@ class LocalBatchDataset(Dataset):
                 image = self.transform(image)
             
             image = image.squeeze(0)
-            mask_tensor = self.segmentations_to_mask(ground_truth, img_size=(1024, 1024)).squeeze(0)
+            mask_tensor = self.segmentations_to_mask(ground_truth, img_size=original_image_shape).squeeze(0)
 
             data_batch.append(((image, torch.tensor(original_image_shape)), mask_tensor))
 
