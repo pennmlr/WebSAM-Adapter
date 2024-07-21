@@ -1,9 +1,6 @@
-import io
 import os
-import pdb
 import json
 import torch
-import boto3
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageOps
@@ -13,45 +10,35 @@ from torch.utils.data import Dataset, DataLoader
 
 load_dotenv()
 
-class S3DataLoader:
-    def __init__(self,
-                 bucket_name,
-                 aws_access_key_id=None,
-                 aws_secret_access_key=None,
-                 aws_session_token=None,
-                 region_name=None):
-        self.bucket_name = bucket_name
-        self.s3_client = boto3.client(
-            's3',
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            aws_session_token=aws_session_token,
-            region_name=region_name
-        )
+class LocalDataLoader:
+    def __init__(self, base_path):
+        self.base_path = base_path
 
-    def ls(self, prefix=''):
-        response = self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, Delimiter='/')
-        directories = [content['Prefix'] for content in response.get('CommonPrefixes', [])]
+    def ls(self, sub_dir=''):
+        full_path = os.path.join(self.base_path, sub_dir)
+        directories = [d for d in os.listdir(full_path) if os.path.isdir(os.path.join(full_path, d))]
         return directories
 
-    def read_json(self, key):
-        obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-        return pd.read_json(io.BytesIO(obj['Body'].read())) 
-    
-    def read_csv(self, key):
-        obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-        return pd.read_csv(io.BytesIO(obj['Body'].read()))
+    def read_json(self, path):
+        full_path = os.path.join(self.base_path, path)
+        with open(full_path, 'r') as f:
+            return pd.read_json(f)
 
-    def read_text(self, key):
-        obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-        return obj['Body'].read().decode('utf-8')
+    def read_csv(self, path):
+        full_path = os.path.join(self.base_path, path)
+        return pd.read_csv(full_path)
 
-    def read_image(self, key):
-        obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-        return Image.open(io.BytesIO(obj['Body'].read()))
+    def read_text(self, path):
+        full_path = os.path.join(self.base_path, path)
+        with open(full_path, 'r') as f:
+            return f.read()
+
+    def read_image(self, path):
+        full_path = os.path.join(self.base_path, path)
+        return Image.open(full_path)
 
 
-class S3BatchDataset(Dataset): 
+class LocalBatchDataset(Dataset): 
     def __init__(self, data_loader, files, batch_size, transform=None): 
         self.data_loader = data_loader 
         self.files = files 
@@ -83,10 +70,10 @@ class S3BatchDataset(Dataset):
             index = file_key.split('/')[-1]
             image_key = f"webis-webseg-20-screenshots/{file_key}/screenshot.png"
             image = self.data_loader.read_image(image_key)
-            #added so input shape to EC tune layer is correct
+            # Ensure input shape to EC tune layer is correct
             if image.mode != 'RGB':
                 image = image.convert('RGB')
-
+            original_image_shape = image.size
             json_key = f"webis-webseg-20-ground-truth/{index}/ground-truth.json"
             ground_truth = self.data_loader.read_text(json_key)
             ground_truth = json.loads(ground_truth).get('segmentations', {}).get('majority-vote', [])
@@ -96,7 +83,7 @@ class S3BatchDataset(Dataset):
             image = image.squeeze(0)
             mask_tensor = self.segmentations_to_mask(ground_truth, img_size=(1024, 1024)).squeeze(0)
 
-            data_batch.append((image, mask_tensor))
+            data_batch.append(((image, torch.tensor(original_image_shape)), mask_tensor))
 
         return data_batch
 
@@ -109,33 +96,20 @@ def combine_image_and_mask(image, mask):
     return combined.convert("RGB")
 
 if __name__ == "__main__":
-    os.environ['OMP_NUM_THREADS'] = '1'
-    os.environ['OPENBLAS_NUM_THREADS'] = '1'
-    os.environ['MKL_NUM_THREADS'] = '1'
-    os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
-    os.environ['NUMEXPR_NUM_THREADS'] = '1'
+    base_path = "/shared_data/mlr_club/3988124"
+    
+    data_loader = LocalDataLoader(base_path)
 
-    bucket_name = "webis-webseg20"
-
-    aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
-    aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-
-    data_loader = S3DataLoader(
-        bucket_name,
-        aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key,
-    )
-
-    contents = data_loader.ls(prefix='')
-    print("Directories in bucket:", contents)
+    contents = data_loader.ls('')
+    print("Directories in base path:", contents)
 
     file_path = 'indices.txt'
 
     with open(file_path, 'r') as f:
         lines = f.readlines()
 
-    indices = [line[:-1] for line in lines][:-1]
-    
+    indices = [line.strip() for line in lines]
+
     train_size = int(0.7 * len(indices))
     test_size = len(indices) - train_size
     train_indices, test_indices = torch.utils.data.random_split(indices, [train_size, test_size])
@@ -143,27 +117,19 @@ if __name__ == "__main__":
     train_indices = [indices[i] for i in train_indices.indices]
     test_indices = [indices[i] for i in test_indices.indices]
 
-    batch_size = 2
+    batch_size = 16
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
     ])
 
-    train_dataset = S3BatchDataset(data_loader, train_indices, batch_size, transform=resize_transform)
+    train_dataset = LocalBatchDataset(data_loader, train_indices, batch_size, transform=resize_transform)
     train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
     for i, batch in enumerate(train_dataloader):
         print(f"Batch {i + 1}")
-        for image, ground_truth in batch:
-            # for img, gt in zip(image, ground_truth):
-            #     img = img.permute(1, 2, 0).mul(255).byte().numpy()
-            #     img = Image.fromarray(img)
-            #     mask = gt.numpy() 
-            #     combined_image = combine_image_and_mask(img, mask)
-            #     combined_image.save(f"combined_image_batch_{i+1}.png")
-            #     print("Saved combined image for batch", i + 1)
-
-            print("Image Shape: ", image.shape)
+        for image_tuple, ground_truth in batch:
+            print("Resized Image Shape: ", image_tuple[0].shape)
+            print("Original Image Shape: ", image_tuple[1])
             print("Ground Truth Mask Shape: ", ground_truth.shape)
             images, ground_truths = zip(*batch)
-

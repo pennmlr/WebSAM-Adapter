@@ -1,4 +1,5 @@
 import os
+import pdb
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -9,7 +10,7 @@ from torchvision import transforms
 from torch.utils.data import DataLoader, random_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from utils.utils import load_pretrained
-from data.datamodule import S3DataLoader, S3BatchDataset
+from data.datamodule import LocalDataLoader, LocalBatchDataset
 from backbone.transformer import TwoWayTransformer as transformer
 from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
 
@@ -46,12 +47,15 @@ def train_model(train_dataloader, val_dataloader, model, criterion, optimizer, s
         running_loss = 0.0
         progress_bar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc=f"Epoch {epoch + 1}/{num_epochs}")
         for batch_idx, batch in progress_bar:
-            images, ground_truths = zip(*batch)
+            image_tuples, ground_truths = zip(*batch)
+            images, image_shapes = zip(*image_tuples)
             images = torch.stack(images).to(device).squeeze(1)
+            image_shapes = torch.stack(image_shapes).to(device)
             ground_truths = torch.stack(ground_truths).to(device)
             print(f"GPU Memory Usage (current, max): {torch.cuda.memory_allocated(device) / 1024 ** 3:.2f} GB, {torch.cuda.max_memory_allocated(device) / 1024 ** 3:.2f} GB")
             optimizer.zero_grad()
-            outputs = model(images)
+            outputs = model(images, image_shapes)
+            # pdb.set_trace()
             loss = criterion(outputs, ground_truths)
             loss.backward()
             optimizer.step()
@@ -87,24 +91,23 @@ def validate_model(val_dataloader, model, criterion, device):
     val_loss = 0.0
     with torch.no_grad():
         for batch in val_dataloader:
-            images, ground_truths = zip(*batch)
+            image_tuples , ground_truths = zip(*batch)
+            images, image_shapes = zip(*image_tuples)
             images = torch.stack(images).to(device).squeeze(1)
+            image_shapes = torch.stack(image_shapes).to(device)
             ground_truths = torch.stack(ground_truths).to(device)
-            outputs = model(images).squeeze(0)
+            outputs = model(images, image_shapes)
             loss = criterion(outputs, ground_truths)
             val_loss += loss.item()
     return val_loss / len(val_dataloader)
 
 if __name__ == "__main__":
-    load_dotenv()
-    bucket_name = "webis-webseg20"
-    aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
-    aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-    data_loader = S3DataLoader(
-        bucket_name,
-        aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key,
-    )
+    base_path = "/shared_data/mlr_club/3988124"
+    
+    data_loader = LocalDataLoader(base_path)
+
+    contents = data_loader.ls('')
+    print("Directories in base path:", contents)
 
     file_path = 'data/indices.txt'
     with open(file_path, 'r') as f:
@@ -126,19 +129,19 @@ if __name__ == "__main__":
     val_indices = [indices[i] for i in val_indices.indices]
     test_indices = [indices[i] for i in test_indices.indices]
 
-    batch_size = 2
+    batch_size = 16
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
     ])
 
-    train_dataset = S3BatchDataset(data_loader, train_indices, batch_size, transform=resize_transform)
-    val_dataset = S3BatchDataset(data_loader, val_indices, batch_size, transform=resize_transform)
+    train_dataset = LocalBatchDataset(data_loader, train_indices, batch_size, transform=resize_transform)
+    val_dataset = LocalBatchDataset(data_loader, val_indices, batch_size, transform=resize_transform)
     train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
     encoder = WebSAMEncoder()
-    twt = transformer(depth=12, embedding_dim=256, num_heads=8, mlp_dim=2048)
+    twt = transformer(depth=2, embedding_dim=256, num_heads=8, mlp_dim=2048)
     decoder = WebSAMDecoder(transformer_dim=256, transformer=twt)
 
     model = WebSAMAdapter(encoder, decoder)
@@ -147,20 +150,21 @@ if __name__ == "__main__":
     optimizer = optim.AdamW(model.parameters(), lr=2e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=20)
 
-    start_epoch = 4
+    start_epoch = 0
     checkpoint_path = './saved_models'
     latest_checkpoint = None
-    if os.path.exists(checkpoint_path):
-        checkpoint_files = [f for f in os.listdir(checkpoint_path) if f.endswith('.pt')]
-        if checkpoint_files:
-            latest_checkpoint = max(checkpoint_files, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    # if os.path.exists(checkpoint_path):
+    #     checkpoint_files = [f for f in os.listdir(checkpoint_path) if f.endswith('.pt')]
+    #     if checkpoint_files:
+    #         latest_checkpoint = max(checkpoint_files, key=lambda x: int(x.split('_')[-1].split('.')[0]))
     
-    if latest_checkpoint:
-        checkpoint = torch.load(os.path.join(checkpoint_path, latest_checkpoint))
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"Resuming training from epoch {start_epoch + 1}")
-    else:
-        sam_path = 'checkpoints/sam_b.pt'
-        load_pretrained(model, sam_path, ignore=['output_upscaling'])
+    # if latest_checkpoint:
+    #     checkpoint = torch.load(os.path.join(checkpoint_path, latest_checkpoint))
+    #     model.load_state_dict(checkpoint['model_state_dict'])
+    #     print(f"Resuming training from epoch {start_epoch + 1}")
+    # else:
+
+    sam_path = 'checkpoints/sam_b.pt'
+    model = load_pretrained(model, sam_path, ignore=[])
 
     train_model(train_dataloader, val_dataloader, model, criterion, optimizer, scheduler, num_epochs=20, start_epoch=start_epoch)

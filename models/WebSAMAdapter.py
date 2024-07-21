@@ -31,7 +31,7 @@ class WebSAMEncoder(nn.Module):
         use_abs_pos: bool = True,
         use_rel_pos: bool = False,
         rel_pos_zero_init: bool = False,
-        window_size: int = 0,
+        window_size: int = 14,
         global_attn_indexes: Tuple[int, ...] = (),
     ) -> None:
         """
@@ -144,7 +144,9 @@ class WebSAMDecoder(nn.Module):
         transformer_dim: int,
         transformer: nn.Module,
         num_multimask_outputs: int = 3, # TODO: figure out a good default
-        activation: Type[nn.Module] = nn.GELU
+        activation: Type[nn.Module] = nn.GELU,
+        embed_dim = 256,
+        bs = 1
     ) -> None:
         """
         SAM mask decoder without prompt encoding and IoU prediction
@@ -156,22 +158,35 @@ class WebSAMDecoder(nn.Module):
             activation (Type[nn.Module], optional): activation function
         """
         super().__init__()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.transformer_dim = transformer_dim
         self.transformer = transformer
-
         self.num_multimask_outputs = num_multimask_outputs
+        self.embed_dim = embed_dim
+        self.bs = bs
+
+        self.iou_token = nn.Embedding(1, transformer_dim)
         self.num_mask_tokens = num_multimask_outputs + 1
-        self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
+        self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim).to(device)
+        self.no_mask_embed = nn.Embedding(1, embed_dim).to(device)
+        # self.output_upscaling = nn.Sequential(
+        #     nn.ConvTranspose2d(transformer_dim, transformer_dim // 4, kernel_size=2, stride=2),
+        #     LayerNorm2d(transformer_dim // 4),
+        #     activation(),
+        #     nn.ConvTranspose2d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2),
+        #     activation(),
+        #     nn.ConvTranspose2d(transformer_dim // 8, 32, kernel_size=2, stride=2),
+        #     activation(),
+        #     nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
+        #     activation(),
+        # )
+
 
         self.output_upscaling = nn.Sequential(
             nn.ConvTranspose2d(transformer_dim, transformer_dim // 4, kernel_size=2, stride=2),
             LayerNorm2d(transformer_dim // 4),
             activation(),
             nn.ConvTranspose2d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2),
-            activation(),
-            nn.ConvTranspose2d(transformer_dim // 8, 32, kernel_size=2, stride=2),
-            activation(),
-            nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
             activation(),
         )
         
@@ -181,6 +196,10 @@ class WebSAMDecoder(nn.Module):
                 for i in range(self.num_mask_tokens)
             ]
         )
+
+        # self.iou_prediction_head = MLP(
+        #     transformer_dim, iou_head_hidden_dim, self.num_mask_tokens, iou_head_depth
+        # )
 
 
 
@@ -219,36 +238,37 @@ class WebSAMDecoder(nn.Module):
         image_embeddings: torch.Tensor,
         image_pe: torch.Tensor
     ) -> torch.Tensor:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Defining dummy emeddings so architecture works without prompting
+        sparse_embeddings = torch.empty((self.bs, 0, self.embed_dim)).to(device)
+        dense_embeddings = self.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
+                self.bs, -1, 64, 64).to(device)
         
-        output_tokens = self.mask_tokens.weight.unsqueeze(0).expand(1, -1, -1) # emulating one-prompt shape from promptable SAM
-        src = torch.repeat_interleave(image_embeddings, output_tokens.shape[0], dim=0)
-        pos_src = torch.repeat_interleave(image_pe, output_tokens.shape[0], dim=0)
+        output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0)
+        output_tokens = output_tokens.unsqueeze(0).expand(sparse_embeddings.size(0), -1, -1)
+        tokens = torch.cat((output_tokens, sparse_embeddings), dim=1)
+
+        # Expand per-image data in batch direction to be per-mask
+        src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
+        src = src + dense_embeddings
+        pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
         b, c, h, w = src.shape
 
-        # print(f'src shape: {src.shape}')
-        # print(f'pos_src shape: {pos_src.shape}')
-        # print(f'output_tokens shape: {output_tokens.shape}')
-        
-        hs, src = self.transformer(src, pos_src, output_tokens)
-        # print(f'hs shape after transformer: {hs.shape}')
-        # print(f'src shape after transformer: {src.shape}')
-        
-        mask_tokens_out = hs[:, :self.num_mask_tokens, :]
-        # print(f'mask_tokens_out shape: {mask_tokens_out.shape}')
-        
+        # Run the transformer
+        hs, src = self.transformer(src, pos_src, tokens)
+        iou_token_out = hs[:, 0, :]
+        mask_tokens_out = hs[:, 1 : (1 + self.num_mask_tokens), :]
+
+        # Upscale mask embeddings and predict masks using the mask tokens
         src = src.transpose(1, 2).view(b, c, h, w)
         upscaled_embedding = self.output_upscaling(src)
-        # print(f'upscaled_embedding shape: {upscaled_embedding.shape}')
-
         hyper_in_list: List[torch.Tensor] = []
         for i in range(self.num_mask_tokens):
             hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :]))
+
         hyper_in = torch.stack(hyper_in_list, dim=1)
-        # print(f'hyper_in shape: {hyper_in.shape}')
-        
         b, c, h, w = upscaled_embedding.shape
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)
-        # print(f'masks shape: {masks.shape}')
 
         return masks
     
@@ -268,12 +288,17 @@ class WebSAMAdapter(nn.Module):
         super().__init__()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.encoder = encoder.to(device)
-        self.pe_layer = PositionEmbeddingRandom(128).to(device)
+        self.pe_layer = PositionEmbeddingRandom(128).to(device) 
         self.decoder = decoder.to(device)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, x_shapes: torch.Tensor) -> torch.Tensor:
         image_embeddings = self.encoder(x)
-        mask = self.decoder(image_embeddings, image_pe=self.pe_layer((64, 64)).unsqueeze(0))
+        low_res_masks = self.decoder(image_embeddings, image_pe=self.pe_layer((64, 64)).unsqueeze(0))
+        mask = self.postprocess_masks(
+            low_res_masks,
+            input_size = (1024, 1024),
+            original_size = tuple(x_shapes.flatten().tolist()),
+        )
         # #TODO: post process back to OG shape
         # mask = self.postprocess_masks(low_res_mask, input_size=(1024, 1024), original_size=original_shape)
         # pdb.set_trace()
@@ -308,7 +333,7 @@ class WebSAMAdapter(nn.Module):
             align_corners=False,
         )
         masks = masks[..., : input_size[0], : input_size[1]]
-        masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False)
+        masks = F.interpolate(masks, (original_size[-2], original_size[-1]), mode="bilinear", align_corners=False)
         return masks
 
 # Lightly adapted from
