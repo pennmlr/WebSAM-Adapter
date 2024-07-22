@@ -37,19 +37,24 @@ def validate_model(val_dataloader, model, device, elements=ELEMENTS):
             for batch in val_dataloader:
                 print('in batch')
                 image_tuples, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks = zip(*batch)
-                images, image_shapes = zip(*image_tuples)
+                images, original_image_shapes = zip(*image_tuples)
                 images = torch.stack(images).to(device).squeeze(1)
-                image_shapes = torch.stack(image_shapes).to(device)
-                targets = torch.stack(targets).to(device)
-                outputs = model(images, image_shapes).squeeze(0)
+                image_shapes = torch.stack(original_image_shapes).to(device)
+                outputs = model(images, image_shapes)
                 pdb.set_trace()
                 # outputs = torch.randint(0, 2, (1024, 1024), dtype=torch.float32)
 
-                masks = [torch.ones(image_shapes, dtype=torch.float32), fine_edges_masks, coarse_edges_masks, dom_nodes_masks]
-                p, r, f1 = evaluation_metric(outputs, targets, masks[ELEMENTS.index(elt)])
-                precisions.append(p)
-                recalls.append(r)
-                f1_scores.append(f1)
+                for output, image_shape, target, fine_edges_mask, coarse_edges_mask, dom_nodes_mask in zip(outputs, original_image_shapes, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks):
+                    pdb.set_trace()
+                    output = output.squeeze(1)
+                    full_mask = torch.ones(output.shape, dtype=torch.float32)
+                    masks = [full_mask, fine_edges_mask, coarse_edges_mask, dom_nodes_mask]
+                    pdb.set_trace()
+                    p, r, f1 = evaluation_metric(output, target, masks[ELEMENTS.index(elt)])
+                    pdb.set_trace()
+                    precisions.append(p)
+                    recalls.append(r)
+                    f1_scores.append(f1)
 
         avg_precision = np.mean(precisions)
         avg_recall = np.mean(recalls)
@@ -75,7 +80,7 @@ if __name__ == "__main__":
 
     indices = [line.strip() for line in lines if line.strip()][:-1]
 
-    batch_size = 1
+    batch_size = 2
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
@@ -88,12 +93,13 @@ if __name__ == "__main__":
     encoder = WebSAMEncoder()
     twt = transformer(depth=2, embedding_dim=256, num_heads=8, mlp_dim=2048)
     decoder = WebSAMDecoder(transformer_dim=256, transformer=twt)
-
     model = WebSAMAdapter(encoder, decoder)
 
-    sam_path = '/shared_data/mlr_club/saved_models/model_epoch_12.pt'
-    model = load_pretrained(model, sam_path, ignore=[])
+    checkpoint_path = '/shared_data/mlr_club/saved_models/model_epoch_12.pt'
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
 
     print('begin validating model')
-    scores = validate_model(val_dataloader=dataloader, model=None, device=device)
+    scores = validate_model(val_dataloader=dataloader, model=model, device=device)
     print(scores)

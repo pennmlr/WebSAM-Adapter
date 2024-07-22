@@ -109,7 +109,8 @@ class LocalBatchEvalDataset(Dataset):
         return torch.from_numpy(np.array(mask)).float()
     
     def nodes_to_mask(self, nodes, img_size=(1024, 1024)):
-        df = pd.read_csv(nodes)
+        # df = pd.read_csv(nodes)
+        df = nodes
         mask = Image.new('L', img_size, 0)
         draw = ImageDraw.Draw(mask)
 
@@ -155,17 +156,22 @@ class LocalBatchEvalDataset(Dataset):
             edges_coarse_image = self.data_loader.read_image(edges_coarse_key)
             nodes_key = f"webis-webseg-20-dom-and-nodes/{index}/nodes.csv"
             nodes = self.data_loader.read_csv(nodes_key)
+            import pdb; pdb.set_trace()
 
             if self.transform:
                 image = self.transform(image)
-                edges_fine_image = self.transform(edges_fine_image)
-                edges_coarse_image = self.transform(edges_coarse_image)
             image = image.squeeze(0)
+
+            edges_transform = transforms.ToTensor()
+            edges_fine_image = edges_transform(edges_fine_image)
+            edges_coarse_image = edges_transform(edges_coarse_image)
             edges_fine_image = edges_fine_image.squeeze(0)
             edges_coarse_image = edges_coarse_image.squeeze(0)
 
             ground_truth_mask_tensor = self.segmentations_to_mask(ground_truth, img_size=original_image_shape).squeeze(0)
-            dom_nodes_mask_tensor = self.nodes_to_mask(nodes, img_size=(1024, 1024)).squeeze(0)
+            dom_nodes_mask_tensor = self.nodes_to_mask(nodes, img_size=original_image_shape).squeeze(0)
+
+            import pdb; pdb.set_trace()
 
             data_batch.append(((image, torch.tensor(original_image_shape)), ground_truth_mask_tensor, edges_fine_image, edges_coarse_image, dom_nodes_mask_tensor))
 
