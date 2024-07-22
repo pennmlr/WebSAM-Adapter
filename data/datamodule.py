@@ -1,4 +1,5 @@
 import os
+import pdb
 import json
 import torch
 import numpy as np
@@ -156,7 +157,6 @@ class LocalBatchEvalDataset(Dataset):
             edges_coarse_image = self.data_loader.read_image(edges_coarse_key)
             nodes_key = f"webis-webseg-20-dom-and-nodes/{index}/nodes.csv"
             nodes = self.data_loader.read_csv(nodes_key)
-            import pdb; pdb.set_trace()
 
             if self.transform:
                 image = self.transform(image)
@@ -170,8 +170,6 @@ class LocalBatchEvalDataset(Dataset):
 
             ground_truth_mask_tensor = self.segmentations_to_mask(ground_truth, img_size=original_image_shape).squeeze(0)
             dom_nodes_mask_tensor = self.nodes_to_mask(nodes, img_size=original_image_shape).squeeze(0)
-
-            import pdb; pdb.set_trace()
 
             data_batch.append(((image, torch.tensor(original_image_shape)), ground_truth_mask_tensor, edges_fine_image, edges_coarse_image, dom_nodes_mask_tensor))
 

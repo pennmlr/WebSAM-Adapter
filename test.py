@@ -1,5 +1,6 @@
 import os
 import pdb
+from collections import defaultdict
 import torch
 import numpy as np
 
@@ -27,38 +28,33 @@ def evaluation_metric(pred, target, mask):
 def validate_model(val_dataloader, model, device, elements=ELEMENTS):
     model.eval()
 
+    precisions = defaultdict(list)
+    recalls = defaultdict(list)
+    f1_scores = defaultdict(list)
+    with torch.no_grad():
+        for batch in val_dataloader:
+            print('in batch')
+            image_tuples, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks = zip(*batch)
+            images, original_image_shapes = zip(*image_tuples)
+            images = torch.stack(images).to(device).squeeze(1)
+            image_shapes = torch.stack(original_image_shapes).to(device)
+            outputs = model(images, image_shapes)
+
+            for output, target, fine_edges_mask, coarse_edges_mask, dom_nodes_mask in zip(outputs, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks):
+                output = output.squeeze(1)
+                full_mask = torch.ones(output.shape, dtype=torch.float32)
+                masks = [full_mask.to(device), fine_edges_mask.to(device), coarse_edges_mask.to(device), dom_nodes_mask.to(device)]
+                for index, elt in enumerate(elements):
+                    p, r, f1 = evaluation_metric(output, target.to(device), masks[index])
+                    precisions[elt].append(p)
+                    recalls[elt].append(r)
+                    f1_scores[elt].append(f1)
+
     scores = {}
     for elt in elements:
-        precisions = []
-        recalls = []
-        f1_scores = []
-
-        with torch.no_grad():
-            for batch in val_dataloader:
-                print('in batch')
-                image_tuples, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks = zip(*batch)
-                images, original_image_shapes = zip(*image_tuples)
-                images = torch.stack(images).to(device).squeeze(1)
-                image_shapes = torch.stack(original_image_shapes).to(device)
-                outputs = model(images, image_shapes)
-                pdb.set_trace()
-                # outputs = torch.randint(0, 2, (1024, 1024), dtype=torch.float32)
-
-                for output, image_shape, target, fine_edges_mask, coarse_edges_mask, dom_nodes_mask in zip(outputs, original_image_shapes, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks):
-                    pdb.set_trace()
-                    output = output.squeeze(1)
-                    full_mask = torch.ones(output.shape, dtype=torch.float32)
-                    masks = [full_mask, fine_edges_mask, coarse_edges_mask, dom_nodes_mask]
-                    pdb.set_trace()
-                    p, r, f1 = evaluation_metric(output, target, masks[ELEMENTS.index(elt)])
-                    pdb.set_trace()
-                    precisions.append(p)
-                    recalls.append(r)
-                    f1_scores.append(f1)
-
-        avg_precision = np.mean(precisions)
-        avg_recall = np.mean(recalls)
-        avg_f1_score = np.mean(f1_scores)
+        avg_precision = np.mean(precisions[elt])
+        avg_recall = np.mean(recalls[elt])
+        avg_f1_score = np.mean(f1_scores[elt])
         h_mean_score = 2 * (avg_precision * avg_recall) / (avg_precision + avg_recall) if (avg_precision + avg_recall) > 0 else 0
 
         scores[elt] = {'precision': avg_precision, 'recall': avg_recall, 'f1-score': avg_f1_score, 'h-mean-score': h_mean_score}
