@@ -87,6 +87,90 @@ class LocalBatchDataset(Dataset):
 
         return data_batch
 
+class LocalBatchEvalDataset(Dataset): 
+    def __init__(self, data_loader, files, batch_size, transform=None): 
+        self.data_loader = data_loader 
+        self.files = files 
+        self.batch_size = batch_size 
+        self.transform = transform 
+        self.batches = self.create_batches() 
+
+    def create_batches(self): 
+        batches = [self.files[i:i + self.batch_size] for i in range(0, len(self.files), self.batch_size)] 
+        return batches 
+
+    def segmentations_to_mask(self, segmentations, img_size=(1024, 1024)):
+        mask = Image.new('L', img_size, 0)
+        draw = ImageDraw.Draw(mask)
+        for polygon in segmentations:
+            for segment in polygon:
+                segment = [(int(x), int(y)) for x, y in segment[0]]  # Ensure coordinates are integers
+                draw.polygon(segment, outline=1, fill=1)
+        return torch.from_numpy(np.array(mask)).float()
+    
+    def nodes_to_mask(self, nodes, img_size=(1024, 1024)):
+        df = pd.read_csv(nodes)
+        mask = Image.new('L', img_size, 0)
+        draw = ImageDraw.Draw(mask)
+
+        for _, row in df.iterrows():
+            left = int(row['left'])
+            bottom = int(row['bottom'])
+            right = int(row['right'])
+            top = int(row['top'])
+            
+            draw.point((left, bottom), fill=1)
+            draw.point((right, bottom), fill=1)
+            draw.point((left, top), fill=1)
+            draw.point((right, top), fill=1)
+            
+            center_x = (left + right) // 2
+            center_y = (top + bottom) // 2
+            draw.point((center_x, center_y), fill=1)
+        
+        return torch.from_numpy(np.array(mask)).float()
+
+    def __len__(self): 
+        return len(self.batches)
+
+    def __getitem__(self, idx): 
+        batch_files = self.batches[idx]
+        data_batch = []
+
+        for file_key in batch_files:
+            index = file_key.split('/')[-1]
+
+            image_key = f"webis-webseg-20-screenshots/{file_key}/screenshot.png"
+            image = self.data_loader.read_image(image_key)
+            # Ensure input shape to EC tune layer is correct
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            original_image_shape = image.size
+            json_key = f"webis-webseg-20-ground-truth/{index}/ground-truth.json"
+            ground_truth = self.data_loader.read_text(json_key)
+            ground_truth = json.loads(ground_truth).get('segmentations', {}).get('majority-vote', [])
+            edges_fine_key = f"webis-webseg-20-screenshots-edges/{file_key}/screenshot-edges-fine.png"
+            edges_fine_image = self.data_loader.read_image(edges_fine_key)
+            edges_coarse_key = f"webis-webseg-20-screenshots-edges/{file_key}/screenshot-edges-coarse.png"
+            edges_coarse_image = self.data_loader.read_image(edges_coarse_key)
+            nodes_key = f"webis-webseg-20-dom-and-nodes/{index}/nodes.csv"
+            nodes = self.data_loader.read_csv(nodes_key)
+
+            if self.transform:
+                image = self.transform(image)
+                edges_fine_image = self.transform(edges_fine_image)
+                edges_coarse_image = self.transform(edges_coarse_image)
+            image = image.squeeze(0)
+            edges_fine_image = edges_fine_image.squeeze(0)
+            edges_coarse_image = edges_coarse_image.squeeze(0)
+
+            ground_truth_mask_tensor = self.segmentations_to_mask(ground_truth, img_size=original_image_shape).squeeze(0)
+            dom_nodes_mask_tensor = self.nodes_to_mask(nodes, img_size=(1024, 1024)).squeeze(0)
+
+            data_batch.append(((image, torch.tensor(original_image_shape)), ground_truth_mask_tensor, edges_fine_image, edges_coarse_image, dom_nodes_mask_tensor))
+
+        return data_batch
+    
 def combine_image_and_mask(image, mask):
     mask = Image.fromarray((mask * 255).astype(np.uint8))
     mask = mask.convert("RGBA")
