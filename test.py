@@ -1,10 +1,15 @@
 import os
+import pdb
 import torch
 import numpy as np
+
+from utils.utils import load_pretrained
 
 from torchvision import transforms
 from torch.utils.data import DataLoader
 from data.datamodule import LocalDataLoader, LocalBatchDataset, LocalBatchEvalDataset
+from backbone.transformer import TwoWayTransformer as transformer
+from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
 
 ELEMENTS = ['pixels', 'fine_edges', 'coarse_edges', 'dom_nodes']
 
@@ -36,7 +41,8 @@ def validate_model(val_dataloader, model, device, elements=ELEMENTS):
                 images = torch.stack(images).to(device).squeeze(1)
                 image_shapes = torch.stack(image_shapes).to(device)
                 targets = torch.stack(targets).to(device)
-                outputs = model(images).squeeze(0)
+                outputs = model(images, image_shapes).squeeze(0)
+                pdb.set_trace()
                 # outputs = torch.randint(0, 2, (1024, 1024), dtype=torch.float32)
 
                 masks = [torch.ones(image_shapes, dtype=torch.float32), fine_edges_masks, coarse_edges_masks, dom_nodes_masks]
@@ -78,6 +84,15 @@ if __name__ == "__main__":
     dataset = LocalBatchEvalDataset(data_loader, indices, batch_size, transform=resize_transform)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    encoder = WebSAMEncoder()
+    twt = transformer(depth=2, embedding_dim=256, num_heads=8, mlp_dim=2048)
+    decoder = WebSAMDecoder(transformer_dim=256, transformer=twt)
+
+    model = WebSAMAdapter(encoder, decoder)
+
+    sam_path = '/shared_data/mlr_club/saved_models/model_epoch_12.pt'
+    model = load_pretrained(model, sam_path, ignore=[])
 
     print('begin validating model')
     scores = validate_model(val_dataloader=dataloader, model=None, device=device)
