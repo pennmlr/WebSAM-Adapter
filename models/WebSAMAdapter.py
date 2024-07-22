@@ -307,8 +307,6 @@ class WebSAMAdapter(nn.Module):
                 original_size = tuple(x_shape.flatten().tolist()),
             )
             
-            # pdb.set_trace()
-
             masks.append(mask)
 
         return masks

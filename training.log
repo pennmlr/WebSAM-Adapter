@@ -29,3 +29,24 @@ INFO:root:Epoch: 11, Validation Loss: 4.4690
 INFO:root:Epoch: 12, Training Loss: 3.8387
 INFO:root:Epoch: 12, Validation Loss: 4.4054
 INFO:root:Saved model weights at epoch 12 to ./saved_models/model_epoch_12.pt
+INFO:root:Epoch: 13, Training Loss: 3.6971
+INFO:root:Epoch: 13, Validation Loss: 4.4168
+INFO:root:Epoch: 14, Training Loss: 3.5278
+INFO:root:Epoch: 14, Validation Loss: 4.4768
+INFO:root:Saved model weights at epoch 14 to ./saved_models/model_epoch_14.pt
+INFO:root:Epoch: 15, Training Loss: 3.3214
+INFO:root:Epoch: 15, Validation Loss: 4.4365
+INFO:root:Epoch: 16, Training Loss: 3.1550
+INFO:root:Epoch: 16, Validation Loss: 4.4285
+INFO:root:Saved model weights at epoch 16 to ./saved_models/model_epoch_16.pt
+INFO:root:Epoch: 17, Training Loss: 2.9891
+INFO:root:Epoch: 17, Validation Loss: 4.5809
+INFO:root:Epoch: 18, Training Loss: 2.8665
+INFO:root:Epoch: 18, Validation Loss: 4.6147
+INFO:root:Saved model weights at epoch 18 to ./saved_models/model_epoch_18.pt
+INFO:root:Epoch: 19, Training Loss: 2.7773
+INFO:root:Epoch: 19, Validation Loss: 4.6602
+INFO:root:Epoch: 20, Training Loss: 2.7301
+INFO:root:Epoch: 20, Validation Loss: 4.7127
+INFO:root:Saved model weights at epoch 20 to ./saved_models/model_epoch_20.pt
+INFO:root:Training completed.

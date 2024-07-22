@@ -22,7 +22,7 @@ def draw_bounding_boxes(image, masks):
     return image
 
 # Load image
-image_path = '000000/screenshot.png'
+image_path = 'test_image.png'
 image = Image.open(image_path).convert('RGB')
 
 # Preprocess the image
@@ -37,36 +37,36 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load the model
 encoder = WebSAMEncoder()
-twt = transformer(depth=12, embedding_dim=256, num_heads=8, mlp_dim=2048)
+twt = transformer(depth=2, embedding_dim=256, num_heads=8, mlp_dim=2048)
 decoder = WebSAMDecoder(transformer_dim=256, transformer=twt)
 model = WebSAMAdapter(encoder, decoder)
 
 # Load model weights
-checkpoint_path = './saved_models/model_epoch_2.pt'
+checkpoint_path = '/shared_data/mlr_club/saved_models/model_epoch_12.pt'
 checkpoint = torch.load(checkpoint_path)
-model.load_state_dict(checkpoint)
+model.load_state_dict(checkpoint['model_state_dict'])
 model.to(device)
 model.eval()
 
 # Move image tensor to the GPU
 image_tensor = image_tensor.to(device)
-dims = image_tensor.size
+image_shape_tensor = torch.tensor(image.size).unsqueeze(0).to(device)
 # Perform forward pass
+# pdb.set_trace()
+
 with torch.no_grad():
-    output_masks = model(image_tensor)
-    output_masks = torch.sigmoid(output_masks)
-    # output_masks = model.postprocess_masks(output_masks, (1024, 1024), (image.size[1], image.size[0]))
+    output_masks = model(image_tensor, image_shape_tensor)
+    output_masks = torch.sigmoid(output_masks[0])
+
 # Process output masks
 output_masks = output_masks.squeeze(0).cpu().numpy()
 # Convert masks to binary format and draw bounding boxes
-output_masks_binary = (output_masks > 0.5).astype(np.uint8)
+output_masks_binary = output_masks.round()
 
-# pdb.set_trace()
 
-to_pil = transforms.ToPILImage()
-resized_image = to_pil(image_tensor.squeeze(0))
-# pdb.set_trace()
-annotated_image = draw_bounding_boxes(resized_image, output_masks_binary)
+# to_pil = transforms.ToPILImage()
+# resized_image = to_pil(image_tensor.squeeze(0))
+annotated_image = draw_bounding_boxes(image, output_masks_binary)
 
 # Save the annotated image
 annotated_image_path = 'annotated_image.png'
