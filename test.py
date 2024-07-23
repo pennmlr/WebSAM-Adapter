@@ -31,9 +31,10 @@ def validate_model(val_dataloader, model, device, elements=ELEMENTS):
     precisions = defaultdict(list)
     recalls = defaultdict(list)
     f1_scores = defaultdict(list)
+    count = 0
     with torch.no_grad():
         for batch in val_dataloader:
-            print('in batch')
+            print(f"in batch: {count}"); count += 1
             image_tuples, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks = zip(*batch)
             images, original_image_shapes = zip(*image_tuples)
             images = torch.stack(images).to(device).squeeze(1)
