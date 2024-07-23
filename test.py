@@ -4,10 +4,8 @@ from collections import defaultdict
 import torch
 import numpy as np
 
-from utils.utils import load_pretrained
-
 from torchvision import transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from data.datamodule import LocalDataLoader, LocalBatchDataset, LocalBatchEvalDataset
 from backbone.transformer import TwoWayTransformer as transformer
 from models.WebSAMAdapter import WebSAMEncoder, WebSAMDecoder, WebSAMAdapter
@@ -64,8 +62,7 @@ def validate_model(val_dataloader, model, device, elements=ELEMENTS):
     
     return scores
 
-
-if __name__ == "__main__":
+def full_dataset_run():
     base_path = "/shared_data/mlr_club/3988124"
     
     data_loader = LocalDataLoader(base_path)
@@ -79,7 +76,7 @@ if __name__ == "__main__":
 
     indices = [line.strip() for line in lines if line.strip()][:-1]
 
-    batch_size = 2
+    batch_size = 4
     resize_transform = transforms.Compose([
         transforms.Resize((1024, 1024)),
         transforms.ToTensor(),
@@ -102,3 +99,62 @@ if __name__ == "__main__":
     print('begin validating model')
     scores = validate_model(val_dataloader=dataloader, model=model, device=device)
     print(scores)
+
+def val_dataset_run():
+    base_path = "/shared_data/mlr_club/3988124"
+    
+    data_loader = LocalDataLoader(base_path)
+
+    contents = data_loader.ls('')
+    print("Directories in base path:", contents)
+
+    file_path = 'data/indices.txt'
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+
+    indices = [line.strip() for line in lines if line.strip()][:-1]
+    
+    seed = 42
+    torch.manual_seed(seed)
+
+    train_size = int(0.7 * len(indices))
+    val_size = int(0.2 * len(indices))
+    test_size = len(indices) - train_size - val_size
+
+    generator = torch.Generator().manual_seed(seed)
+    train_indices, val_indices, test_indices = random_split(indices, [train_size, val_size, test_size], generator=generator)
+
+    train_indices = [indices[i] for i in train_indices.indices]
+    val_indices = [indices[i] for i in val_indices.indices]
+    test_indices = [indices[i] for i in test_indices.indices]
+
+    batch_size = 4
+    resize_transform = transforms.Compose([
+        transforms.Resize((1024, 1024)),
+        transforms.ToTensor(),
+    ])
+
+    train_dataset = LocalBatchEvalDataset(data_loader, train_indices, batch_size, transform=resize_transform)
+    val_dataset = LocalBatchEvalDataset(data_loader, val_indices, batch_size, transform=resize_transform)
+    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    encoder = WebSAMEncoder()
+    twt = transformer(depth=2, embedding_dim=256, num_heads=8, mlp_dim=2048)
+    decoder = WebSAMDecoder(transformer_dim=256, transformer=twt)
+
+    model = WebSAMAdapter(encoder, decoder)
+
+    checkpoint_path = '/shared_data/mlr_club/saved_models/model_epoch_12.pt'
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
+
+    print('begin validating model')
+    scores = validate_model(val_dataloader=val_dataloader, model=model, device=device)
+    print(scores)
+
+if __name__ == "__main__":
+    val_dataset_run()
