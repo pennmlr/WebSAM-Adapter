@@ -44,7 +44,7 @@ def validate_model(val_dataloader, model, device, elements=ELEMENTS):
 
             for output, target, fine_edges_mask, coarse_edges_mask, dom_nodes_mask in zip(outputs, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks):
                 output = torch.sigmoid(output).squeeze(0)
-                output_binary = output.cpu().numpy().round()
+                output_binary = output.cpu().round()
                 full_mask = torch.ones(output.shape, dtype=torch.float32)
                 masks = [full_mask, fine_edges_mask, coarse_edges_mask, dom_nodes_mask]
                 for index, elt in enumerate(elements):
