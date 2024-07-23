@@ -34,7 +34,8 @@ def validate_model(val_dataloader, model, device, elements=ELEMENTS):
     count = 0
     with torch.no_grad():
         for batch in val_dataloader:
-            print(f"in batch: {count}"); count += 1
+            count += 1
+            print(f"in batch: {count}")
             image_tuples, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks = zip(*batch)
             images, original_image_shapes = zip(*image_tuples)
             images = torch.stack(images).to(device).squeeze(1)
@@ -42,11 +43,12 @@ def validate_model(val_dataloader, model, device, elements=ELEMENTS):
             outputs = model(images, image_shapes)
 
             for output, target, fine_edges_mask, coarse_edges_mask, dom_nodes_mask in zip(outputs, targets, fine_edges_masks, coarse_edges_masks, dom_nodes_masks):
-                output = output.squeeze(1)
+                output = torch.sigmoid(output).squeeze(0)
+                output_binary = output.cpu().numpy().round()
                 full_mask = torch.ones(output.shape, dtype=torch.float32)
-                masks = [full_mask.to(device), fine_edges_mask.to(device), coarse_edges_mask.to(device), dom_nodes_mask.to(device)]
+                masks = [full_mask, fine_edges_mask, coarse_edges_mask, dom_nodes_mask]
                 for index, elt in enumerate(elements):
-                    p, r, f1 = evaluation_metric(output, target.to(device), masks[index])
+                    p, r, f1 = evaluation_metric(output_binary, target, masks[index])
                     precisions[elt].append(p)
                     recalls[elt].append(r)
                     f1_scores[elt].append(f1)
